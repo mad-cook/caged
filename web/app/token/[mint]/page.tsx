@@ -52,19 +52,20 @@ export default function TokenPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           {data.image ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={data.image} alt="" className="h-14 w-14 rounded-full object-cover" />
           ) : (
             <span className="h-14 w-14 rounded-full bg-ink-600" />
           )}
-          <div>
-            <h1 className="text-2xl font-black">
+          <div className="min-w-0">
+            <p className="eyebrow mb-2">Public conviction</p>
+            <h1 className="font-display text-4xl uppercase">
               {symbol} <span className="text-base font-medium text-slate-400">{data.name}</span>
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-              <a className="font-mono text-slate-400 underline" href={EXPLORER(data.mint)} target="_blank" rel="noreferrer">
+              <a className="break-all font-mono text-slate-400 underline" href={EXPLORER(data.mint)} target="_blank" rel="noreferrer">
                 {data.mint}
               </a>
               {data.pump?.isHolderReward && <span className="badge bg-acid/15 text-acid">✦ Holder Rewards</span>}
@@ -92,7 +93,7 @@ export default function TokenPage() {
       {data.boostPool && (
         <div className={`card p-4 ${data.boostPool.active ? "border-acid/40" : ""}`}>
           <div className="font-semibold">
-            🔥 Boost pool: +{data.boostPool.bonusBps / 100}% rewards for locks ≥ {durationLabel(data.boostPool.minDurationSeconds)}
+            ◇ Reward boost: +{data.boostPool.bonusBps / 100}% for locks ≥ {durationLabel(data.boostPool.minDurationSeconds)}
             {!data.boostPool.active && <span className="ml-2 text-xs text-slate-400">(inactive)</span>}
           </div>
           <div className="mt-1 grid gap-x-6 gap-y-1 text-sm text-slate-300 sm:grid-cols-3">

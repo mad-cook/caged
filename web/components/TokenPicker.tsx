@@ -60,9 +60,9 @@ export default function TokenPicker({
 
   return (
     <div className="relative">
-      <button type="button" className="input flex items-center justify-between text-left" onClick={() => setOpen((o) => !o)}>
+      <button type="button" aria-label="Select a token to lock" aria-expanded={open} className="input flex items-center justify-between gap-2 text-left" onClick={() => setOpen((o) => !o)}>
         {value ? (
-          <span className="flex items-center gap-2">
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
             {value.image ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={value.image} alt="" className="h-6 w-6 rounded-full object-cover" />
@@ -85,6 +85,7 @@ export default function TokenPicker({
             <input
               autoFocus
               className="input"
+              aria-label="Filter wallet tokens"
               placeholder="Search by symbol, name or mint"
               value={q}
               onChange={(e) => setQ(e.target.value)}

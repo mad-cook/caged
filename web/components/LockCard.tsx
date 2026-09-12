@@ -100,9 +100,9 @@ export default function LockCard({
   const estBonus = boost && boost.active && boostedShare > 0 ? Math.floor((netClaim * lock.bonusBps * boostedShare) / 10_000) : 0;
 
   return (
-    <div className="card p-5">
+    <div className="card min-w-0 p-5 sm:p-7">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           {meta?.image ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={meta.image} alt="" className="h-10 w-10 rounded-full object-cover" />
@@ -110,11 +110,11 @@ export default function LockCard({
             <span className="h-10 w-10 rounded-full bg-ink-600" />
           )}
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-lg font-bold">{meta?.symbol ?? shortAddr(lock.mint.toBase58())}</span>
               {pump && <PumpBadge t={{ pump }} />}
               {!lock.boostedAmount.isZero() && (
-                <span className="badge bg-ember/15 text-ember">🔥 +{lock.bonusBps / 100}% boost</span>
+                <span className="badge bg-sol/15 text-sol">◇ +{lock.bonusBps / 100}% boost</span>
               )}
               {lock.withdrawn && <span className="badge bg-ink-600 text-slate-300">withdrawn</span>}
             </div>
@@ -131,7 +131,7 @@ export default function LockCard({
         </div>
       </div>
 
-      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
+      <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 border-y border-ink-700 py-5 text-sm sm:grid-cols-4">
         <div>
           <dt className="text-xs text-slate-500">Unlock time</dt>
           <dd>{formatDate(unlockTs)}</dd>

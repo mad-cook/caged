@@ -9,6 +9,8 @@ test-ledger
 .env.local
 .env.*.local
 web/.next
+web/.next-brand-check
 web/out
 *-keypair.json
 !target/deploy/.gitkeep
+web/tsconfig.tsbuildinfo

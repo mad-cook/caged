@@ -1,18 +1,21 @@
 import { BRAND_NAME, PROGRAM_ID, EXPLORER } from "@/lib/constants";
+import BrandMark from "@/components/BrandMark";
+import Link from "next/link";
 
 export default function HowItWorks() {
   return (
-    <article className="prose-invert mx-auto max-w-3xl space-y-8">
+    <article className="doc-page mx-auto max-w-3xl space-y-8">
       <section>
-        <h1 className="text-3xl font-black">How it works</h1>
+        <div className="mb-6 flex items-center justify-between gap-4"><div><p className="eyebrow mb-4">Know what you are locking into</p><h1 className="page-title">How it works</h1></div><BrandMark className="hidden h-24 w-20 shrink-0 sm:block" /></div>
         <p className="mt-3 text-slate-300">
           Pump.fun&apos;s <strong>Holder Rewards</strong> coins send the creator fee of every trade to the coin&apos;s
           holders instead of the creator. Pump.fun runs the distribution itself: it looks at who holds the coin
           and pays each holder&apos;s <em>wallet</em>, several times an hour, with no claim step.
         </p>
         <p className="mt-3 text-slate-300">
-          The catch: if you lock tokens in a normal locker, they move into a vault owned by the locker
-          contract. From pump.fun&apos;s point of view <em>the locker</em> is now the holder, not you.
+          Locking moves your tokens into a vault. Reward compatibility depends on who owns that vault and
+          whether the locker can pass distributions through to you. Caged Diamond Balls gives each lock
+          its own holder address and lets its owner claim eligible rewards.
         </p>
       </section>
 
@@ -38,21 +41,24 @@ export default function HowItWorks() {
       <section className="card p-5">
         <h2 className="text-xl font-bold">Fees</h2>
         <ul className="mt-3 list-disc space-y-1 pl-5 text-slate-300">
-          <li>Flat fee per lock creation (shown in the form, currently 0.1 SOL).</li>
-          <li>A small percentage of every reward claim (currently 2%). No fee on the locked tokens themselves.</li>
+          <li>A flat fee per lock creation. The current amount is shown in the lock form.</li>
+          <li>A percentage of each reward claim, shown before you lock. No fee on the locked tokens themselves.</li>
           <li>You pay normal Solana network fees and refundable account rent. Rent comes back when you close a lock.</li>
           <li>Topping up, extending and withdrawing are free apart from network fees.</li>
         </ul>
       </section>
 
       <section className="card p-5" id="boost">
-        <h2 className="text-xl font-bold">🔥 Boost pools ({BRAND_NAME})</h2>
+        <p className="eyebrow mb-3">A little more conviction</p>
+        <h2 className="text-xl font-bold">The {BRAND_NAME} reward match</h2>
         <p className="mt-3 text-slate-300">
           A boost pool can be attached to a token. Locks that run at least the pool&apos;s minimum duration are enrolled
           on a first-come basis until the pool&apos;s capacity is full. Whenever an enrolled lock claims rewards, the
           pool pays an extra percentage on top, from SOL the pool sponsor deposited. For {BRAND_NAME}: lock for 7
-          days or more, and the first 25% of supply locked earns 2x. If the pool runs dry the base rewards are
-          unaffected.
+          days or more, with capacity for up to 25% of supply. Enrolled amounts can receive a 1:1 match on
+          net SOL holder rewards, depending on available pool funds. If only part of a lock fits, only that
+          part earns a match. Capacity is released on withdrawal; waiting locks are not automatically enrolled.
+          If the pool runs dry the base rewards are unaffected.
         </p>
       </section>
 
@@ -78,7 +84,7 @@ GET /api/stats          # protocol-wide counters (total locks, fees, rewards pai
       </section>
 
       <section className="card p-5">
-        <h2 className="text-xl font-bold">Risks and honesty</h2>
+        <h2 className="text-xl font-bold">Before you lock</h2>
         <ul className="mt-3 list-disc space-y-1 pl-5 text-slate-300">
           <li>
             Pump.fun decides who counts as a holder and how much each gets. We built the lock so it looks like a
@@ -89,11 +95,12 @@ GET /api/stats          # protocol-wide counters (total locks, fees, rewards pai
         </ul>
         <p className="mt-3 text-xs text-slate-500">
           Program:{" "}
-          <a className="underline" href={EXPLORER(PROGRAM_ID.toBase58())} target="_blank" rel="noreferrer">
+          <a className="break-all underline" href={EXPLORER(PROGRAM_ID.toBase58())} target="_blank" rel="noreferrer">
             {PROGRAM_ID.toBase58()}
           </a>
         </p>
       </section>
+      <Link href="/#create-lock" className="btn-primary">Create your lock →</Link>
     </article>
   );
 }

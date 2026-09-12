@@ -1,9 +1,9 @@
 import { PublicKey } from "@solana/web3.js";
 
-export const SITE_NAME = process.env.NEXT_PUBLIC_SITE_NAME || "Caged";
+export const SITE_NAME = "Caged Diamond Balls";
 export const X_URL = "https://x.com/cagedballs";
 export const GITHUB_URL = "https://github.com/mad-cook/caged";
-export const BRAND_NAME = process.env.NEXT_PUBLIC_BRAND_NAME || "Conviction";
+export const BRAND_NAME = "$CAGED";
 export const BRAND_MINT = process.env.NEXT_PUBLIC_BRAND_MINT || "";
 
 export const CLUSTER = (process.env.NEXT_PUBLIC_CLUSTER || "mainnet-beta") as

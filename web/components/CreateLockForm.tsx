@@ -7,6 +7,8 @@ import { PublicKey } from "@solana/web3.js";
 import { BN } from "@coral-xyz/anchor";
 import TokenPicker from "./TokenPicker";
 import TxStatus from "./TxStatus";
+import BrandMark from "./BrandMark";
+import WalletButton from "./WalletButton";
 import { useProgram } from "@/hooks/useProgram";
 import { useSendTx } from "@/hooks/useSendTx";
 import { WalletToken } from "@/lib/tokens";
@@ -96,12 +98,15 @@ export default function CreateLockForm() {
   }
 
   return (
-    <div className="card p-5 sm:p-6">
-      <h2 className="mb-4 text-lg font-bold">Create a lock</h2>
+    <div className="card lock-form min-w-0 p-5 sm:p-7">
+      <div className="mb-6 flex items-center justify-between gap-3 border-b border-ink-700 pb-5">
+        <div><p className="eyebrow mb-2">Make your move</p><h2 className="font-display text-3xl uppercase">Create a lock</h2></div>
+        <BrandMark className="h-12 w-11" />
+      </div>
 
       <div className="space-y-4">
         <div>
-          <label className="label">Token</label>
+          <div className="label">01 / Select your token</div>
           <TokenPicker value={token} onChange={setToken} refreshKey={refreshKey} />
           {token && !token.pump.isHolderReward && (
             <p className="mt-2 text-xs text-slate-400">
@@ -113,7 +118,7 @@ export default function CreateLockForm() {
 
         <div>
           <div className="flex items-center justify-between">
-            <label className="label">Amount</label>
+            <label htmlFor="lock-amount" className="label">02 / Amount to lock</label>
             {token && (
               <button
                 type="button"
@@ -125,6 +130,7 @@ export default function CreateLockForm() {
             )}
           </div>
           <input
+            id="lock-amount"
             className="input font-mono"
             placeholder="0.00"
             inputMode="decimal"
@@ -134,8 +140,9 @@ export default function CreateLockForm() {
         </div>
 
         <div>
-          <label className="label">Unlock date &amp; time (your local time)</label>
+          <label htmlFor="lock-unlock-time" className="label">03 / Unlock date &amp; time (your local time)</label>
           <input
+            id="lock-unlock-time"
             type="datetime-local"
             className="input"
             value={unlockLocal}
@@ -147,7 +154,7 @@ export default function CreateLockForm() {
               <button
                 key={p.s}
                 type="button"
-                className="rounded-lg border border-ink-600 px-2.5 py-1 text-xs text-slate-300 hover:border-acid/60"
+                className="min-h-11 rounded-lg border border-ink-600 px-3 py-2 text-xs text-slate-300 transition-colors hover:border-acid/60 hover:bg-acid/5"
                 onClick={() => setUnlockLocal(toDatetimeLocal(Math.floor(Date.now() / 1000) + p.s))}
               >
                 {p.label}
@@ -166,7 +173,7 @@ export default function CreateLockForm() {
             }`}
           >
             <div className="font-semibold">
-              🔥 Boost pool: +{boost.bonusBps / 100}% rewards for locks ≥ {durationLabel(boost.minDuration.toNumber())}
+              ◇ Reward boost: +{boost.bonusBps / 100}% for locks ≥ {durationLabel(boost.minDuration.toNumber())}
             </div>
             <div className="text-xs text-slate-300">
               {boostEligible
@@ -180,7 +187,7 @@ export default function CreateLockForm() {
           </div>
         )}
 
-        <div className="rounded-xl border border-ink-700 bg-ink-950/60 p-3 text-sm">
+        <div className="fee-summary">
           <div className="flex justify-between">
             <span className="text-slate-400">Lock creation fee</span>
             <span className="font-mono">{config ? lamportsToSol(config.lockFeeLamports) : "—"} SOL</span>
@@ -198,15 +205,16 @@ export default function CreateLockForm() {
           </div>
         </div>
 
-        <button className="btn-primary w-full" disabled={problems.length > 0 || busy} onClick={submit}>
+        {!publicKey ? <div className="flex justify-center rounded-xl border border-ink-700 bg-ink-950/30 p-4"><WalletButton /></div> : <button className="btn-primary w-full" disabled={problems.length > 0 || busy} onClick={submit}>
           {busy ? "Locking…" : problems[0] ?? `Lock ${token?.symbol ?? "tokens"}`}
-        </button>
+        </button>}
+        <p className="text-center text-[11px] leading-relaxed text-slate-500">Your tokens cannot be withdrawn before the unlock time. Eligible rewards can be claimed separately.</p>
 
         <TxStatus state={state} onDismiss={reset} />
 
         {created && (
           <div className="rounded-xl border border-acid/40 bg-acid/10 p-3 text-sm">
-            <div className="font-semibold text-acid-soft">Lock created 🎉</div>
+            <div className="font-semibold text-acid-soft">Conviction confirmed. Lock created.</div>
             <div className="mt-1 flex flex-wrap gap-3 text-xs">
               <Link className="underline" href={`/lock/${created.lock}`}>
                 Public lock page

@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export default function TokenSearch({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
+  const errorId = useId();
   const [q, setQ] = useState("");
   const [err, setErr] = useState<string | null>(null);
 
@@ -21,11 +22,14 @@ export default function TokenSearch({ compact = false }: { compact?: boolean }) 
   }
 
   return (
-    <div className={compact ? "w-full max-w-xs" : "w-full"}>
+    <div className={compact ? "w-full min-w-0 max-w-xs" : "w-full min-w-0"}>
       <div className="flex gap-2">
         <input
           className={`input ${compact ? "!py-1.5 text-xs" : ""}`}
-          placeholder={compact ? "Search token mint…" : "Paste a token mint address to see how much is locked"}
+          aria-label="Token mint address"
+          aria-invalid={!!err}
+          aria-describedby={err ? errorId : undefined}
+          placeholder={compact ? "Find a token…" : "Paste a token mint address"}
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && go()}
@@ -35,7 +39,7 @@ export default function TokenSearch({ compact = false }: { compact?: boolean }) 
           Search
         </button>
       </div>
-      {err && <div className="mt-1 text-xs text-ember">{err}</div>}
+      {err && <div id={errorId} role="alert" className="mt-2 text-xs text-ember">{err}</div>}
     </div>
   );
 }
