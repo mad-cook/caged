@@ -31,7 +31,7 @@ export const TOKEN_2022_PROGRAM_ID = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 
 /** Rent-exempt minimum for a 0-byte account; the vault authority keeps this. */
-export const VAULT_RESERVE_LAMPORTS = 890_880;
+export const VAULT_RESERVE_LAMPORTS = 650_240; // fallback only; fetched live via getMinimumBalanceForRentExemption(0)
 
 export const EXPLORER = (sigOrAddr: string, type: "tx" | "address" = "address") =>
   `https://solscan.io/${type === "tx" ? "tx" : "account"}/${sigOrAddr}${

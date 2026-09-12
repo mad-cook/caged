@@ -134,7 +134,7 @@ against mainnet on 2026-09-12: e.g. mint `5gXxthzJJPnR4g6TPt5k1TyLS3dCqyurPfWkJv
 | cluster | program | notes |
 | --- | --- | --- |
 | devnet | `65cX8gGch8x4vQvU4gnpPcepwKadDSAtJ4ZgZg3hp61t` | deployed 2026-09-12, upgrade authority `C7bttWUQDVGjxtUpAh1n18vRwQrbTaxV2kVmMkgD16xF` |
-| mainnet | – | not yet (deployer wallet has 0 SOL on mainnet) |
+| mainnet | `65cX8gGch8x4vQvU4gnpPcepwKadDSAtJ4ZgZg3hp61t` | deployed 2026-09-12, program-data 520,960 bytes (40 KB upgrade headroom), config `HWBkUm3vHAxdAWbP6AeKmfwPYr7zrBorXyecyqMMUZDo`, treasury `6AFfye8q75ZpQ8YT2MbU2Tqkcu8KZbqFga7Z4nHGpCJX` (keypair `~/caged-treasury.json`, NOT in git), fees 0.1 SOL / 2% |
 
 ## Railway
 
