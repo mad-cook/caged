@@ -1,4 +1,7 @@
-# Railway / Nixpacks: build only the web app (the Anchor program is built separately).
+# Fallback if the Dockerfile builder is not used. Force the Node provider so
+# Nixpacks does not pick Rust because of the Anchor Cargo.toml at the root.
+providers = ["node"]
+
 [phases.setup]
 nixPkgs = ["nodejs_20"]
 

@@ -1,0 +1,13 @@
+node_modules
+web/node_modules
+web/.next
+web/.env.local
+web/.env*.local
+target
+.anchor
+test-ledger
+.git
+programs
+tests
+scripts
+*.md
