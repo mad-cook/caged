@@ -81,21 +81,22 @@ export interface TokenLocksJson {
 }
 
 function decodeLock(pubkey: PublicKey, data: Buffer): LockJson & { decimalsHint?: number } {
+  // NB: the raw coder keeps the IDL snake_case field names.
   const l = coder.decode("Lock", data);
   return {
     address: pubkey.toBase58(),
     owner: l.owner.toBase58(),
     mint: l.mint.toBase58(),
-    vaultAuthority: l.vaultAuthority.toBase58(),
+    vaultAuthority: l.vault_authority.toBase58(),
     amountRaw: l.amount.toString(),
     amount: "", // filled once decimals are known
-    unlockTs: l.unlockTs.toNumber(),
-    createdTs: l.createdTs.toNumber(),
+    unlockTs: l.unlock_ts.toNumber(),
+    createdTs: l.created_ts.toNumber(),
     withdrawn: l.withdrawn,
-    boostedAmountRaw: l.boostedAmount.toString(),
-    bonusBps: l.bonusBps,
-    solRewardsClaimedLamports: l.solRewardsClaimed.toString(),
-    bonusPaidLamports: l.bonusPaid.toString(),
+    boostedAmountRaw: l.boosted_amount.toString(),
+    bonusBps: l.bonus_bps,
+    solRewardsClaimedLamports: l.sol_rewards_claimed.toString(),
+    bonusPaidLamports: l.bonus_paid.toString(),
   };
 }
 
@@ -186,11 +187,11 @@ export async function buildTokenLocks(mint: PublicKey): Promise<TokenLocksJson> 
         address: boostPda.toBase58(),
         capacityRaw: p.capacity.toString(),
         enrolledRaw: p.enrolled.toString(),
-        minDurationSeconds: p.minDuration.toNumber(),
-        bonusBps: p.bonusBps,
+        minDurationSeconds: p.min_duration.toNumber(),
+        bonusBps: p.bonus_bps,
         active: p.active,
         balanceLamports: boostInfo.lamports,
-        totalBonusPaidLamports: p.totalBonusPaid.toString(),
+        totalBonusPaidLamports: p.total_bonus_paid.toString(),
       };
     } catch {
       boostPool = null;

@@ -131,7 +131,8 @@ export async function fetchBoostPool(program: Program<HolderLocker>, mint: Publi
   const pk = boostPoolPda(mint);
   const info = await program.provider.connection.getAccountInfo(pk, "confirmed");
   if (!info) return null;
-  const acc = program.coder.accounts.decode("BoostPool", info.data);
+  const acc = await program.account.boostPool.fetchNullable(pk);
+  if (!acc) return null;
   return { publicKey: pk, lamports: info.lamports, ...(acc as unknown as Omit<BoostPoolAccount, "publicKey" | "lamports">) };
 }
 
