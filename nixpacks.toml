@@ -1,0 +1,12 @@
+# Railway / Nixpacks: build only the web app (the Anchor program is built separately).
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["cd web && npm ci"]
+
+[phases.build]
+cmds = ["cd web && npm run build"]
+
+[start]
+cmd = "cd web && npm start"
