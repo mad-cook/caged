@@ -12,7 +12,7 @@
       "docs": [
         "Sweep every lamport above the rent reserve that pump.fun (or anyone)",
         "sent to the vault authority. `reward_fee_bps` goes to the treasury, the",
-        "rest to the owner. If the lock is boost-enrolled and the mint's",
+        "rest to the owner. If the lock is boost-enrolled and the mint's SOL",
         "`BoostPool` is passed, the bonus is paid on top from the pool."
       ],
       "discriminator": [
@@ -147,7 +147,10 @@
       "docs": [
         "Same as `claim_sol_rewards` but for an SPL / Token-2022 token that was",
         "sent to the vault authority (e.g. a token-quoted coin's rewards). The",
-        "locked mint itself is refused so this can never bypass the time-lock."
+        "locked mint itself is refused so this can never bypass the time-lock.",
+        "If the mint's `BoostPool` pays in `reward_mint`, pass it together with",
+        "its token account to receive the bonus.",
+        "Remaining accounts: transfer-hook accounts for `reward_mint`, if any."
       ],
       "discriminator": [
         244,
@@ -194,6 +197,7 @@
         },
         {
           "name": "lock",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -417,6 +421,94 @@
           }
         },
         {
+          "name": "boost_pool",
+          "docs": [
+            "Optional: the locked mint's boost pool (only pays if it rewards in `reward_mint`)."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  111,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lock.mint",
+                "account": "Lock"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boost_pool_token_account",
+          "docs": [
+            "Optional: the pool's token account for `reward_mint`."
+          ],
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "boost_pool"
+              },
+              {
+                "kind": "account",
+                "path": "reward_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "reward_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
           "name": "reward_token_program"
         },
         {
@@ -543,7 +635,10 @@
       "name": "create_boost_pool",
       "docs": [
         "Admin: create a boost pool for `mint`. `capacity` is in raw token",
-        "units, `min_duration` in seconds, `bonus_bps` 10_000 = +100% (2x)."
+        "units, `min_duration` in seconds, `bonus_bps` 10_000 = +100% (2x).",
+        "Pass `reward_mint` to pay bonuses in that token instead of SOL; the",
+        "pool's associated token account for it must then be created (anyone",
+        "can, it is just an ATA owned by the pool PDA) and funded by transfer."
       ],
       "discriminator": [
         147,
@@ -608,6 +703,20 @@
           }
         },
         {
+          "name": "reward_mint",
+          "docs": [
+            "Optional: pay bonuses in this token instead of SOL."
+          ],
+          "optional": true
+        },
+        {
+          "name": "reward_token_program",
+          "docs": [
+            "Optional: token program of `reward_mint`."
+          ],
+          "optional": true
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
@@ -633,7 +742,8 @@
         "Lock `amount` of `mint` until `unlock_ts`. Charges the flat creation fee",
         "in lamports to the treasury. `lock_id` is any client-chosen u64 that is",
         "unique per (owner, lock_id); the UI uses a millisecond timestamp.",
-        "Pass the mint's `BoostPool` (if one exists) to enroll in the boost."
+        "Pass the mint's `BoostPool` (if one exists) to enroll in the boost.",
+        "Remaining accounts: transfer-hook accounts for `mint`, if any."
       ],
       "discriminator": [
         171,
@@ -904,7 +1014,7 @@
     {
       "name": "fund_boost_pool",
       "docs": [
-        "Anyone: deposit SOL that funds the bonus payouts."
+        "Anyone: deposit SOL that funds the bonus payouts of a SOL pool."
       ],
       "discriminator": [
         104,
@@ -1016,7 +1126,8 @@
     {
       "name": "top_up",
       "docs": [
-        "Add more tokens to an existing, not-yet-withdrawn lock. No fee."
+        "Add more tokens to an existing, not-yet-withdrawn lock. No fee.",
+        "Remaining accounts: transfer-hook accounts for `mint`, if any."
       ],
       "discriminator": [
         236,
@@ -1292,7 +1403,8 @@
         "After `unlock_ts`: return every locked token to the owner and close the",
         "vault token account (rent goes back to the owner). The lock account is",
         "kept so late-arriving rewards can still be claimed; use `close_lock`",
-        "afterwards to reclaim its rent."
+        "afterwards to reclaim its rent.",
+        "Remaining accounts: transfer-hook accounts for `mint`, if any."
       ],
       "discriminator": [
         183,
@@ -1578,6 +1690,195 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "withdraw_boost_pool_tokens",
+      "docs": [
+        "Pool authority: take unspent reward tokens back out of a token pool.",
+        "Remaining accounts: transfer-hook accounts for `reward_mint`, if any."
+      ],
+      "discriminator": [
+        168,
+        183,
+        68,
+        50,
+        15,
+        254,
+        252,
+        98
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "boost_pool"
+          ]
+        },
+        {
+          "name": "boost_pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  111,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "boost_pool.mint",
+                "account": "BoostPool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "reward_mint",
+          "relations": [
+            "boost_pool"
+          ]
+        },
+        {
+          "name": "pool_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "boost_pool"
+              },
+              {
+                "kind": "account",
+                "path": "reward_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "reward_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "authority_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "account",
+                "path": "reward_token_program"
+              },
+              {
+                "kind": "account",
+                "path": "reward_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "reward_token_program",
+          "relations": [
+            "boost_pool"
+          ]
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -1787,6 +2088,11 @@
     },
     {
       "code": 6014,
+      "name": "RewardMintProgramMismatch",
+      "msg": "Reward mint and reward token program must be passed together and match"
+    },
+    {
+      "code": 6015,
       "name": "MathOverflow",
       "msg": "Math overflow"
     }
@@ -1832,6 +2138,9 @@
           },
           {
             "name": "total_bonus_paid",
+            "docs": [
+              "Total bonus paid, in the reward asset's units."
+            ],
             "type": "u64"
           },
           {
@@ -1841,6 +2150,18 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "reward_mint",
+            "docs": [
+              "Asset bonuses are paid in. `Pubkey::default()` = native SOL held on",
+              "this account; otherwise a mint whose ATA (owned by this PDA) holds it."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_token_program",
+            "type": "pubkey"
           }
         ]
       }
@@ -2004,7 +2325,8 @@
           {
             "name": "bonus_paid",
             "docs": [
-              "Total bonus SOL paid to the owner from the boost pool."
+              "Total bonus paid to the owner from the boost pool, in the pool's",
+              "reward asset (lamports for SOL pools, raw token units otherwise)."
             ],
             "type": "u64"
           },

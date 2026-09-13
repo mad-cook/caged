@@ -13,13 +13,20 @@
 //! program signs for the PDA, takes the protocol fee, and forwards the rest.
 //! Locked tokens themselves can only leave through `withdraw`, after `unlock_ts`.
 //!
+//! Every token transfer goes through `transfer_tokens`, which supports
+//! Token-2022 transfer hooks: pass the hook program, its extra-account-meta
+//! list and any extra accounts as remaining accounts.
+//!
 //! Boost pools: the protocol admin can attach a `BoostPool` to any mint. The
 //! first `capacity` tokens locked for at least `min_duration` are enrolled and
-//! receive an extra `bonus_bps` of every SOL reward claim, paid from the pool.
+//! receive an extra `bonus_bps` of every reward claim, paid from the pool. A
+//! pool pays in SOL (`reward_mint == Pubkey::default()`) or in one SPL /
+//! Token-2022 mint held in the pool's associated token account.
 
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 use anchor_spl::associated_token::AssociatedToken;
+use anchor_spl::token_2022::spl_token_2022;
 use anchor_spl::token_interface::{
     self, CloseAccount, Mint, TokenAccount, TokenInterface, TransferChecked,
 };
@@ -91,8 +98,9 @@ pub mod holder_locker {
     /// in lamports to the treasury. `lock_id` is any client-chosen u64 that is
     /// unique per (owner, lock_id); the UI uses a millisecond timestamp.
     /// Pass the mint's `BoostPool` (if one exists) to enroll in the boost.
-    pub fn create_lock(
-        ctx: Context<CreateLock>,
+    /// Remaining accounts: transfer-hook accounts for `mint`, if any.
+    pub fn create_lock<'info>(
+        ctx: Context<'_, '_, 'info, 'info, CreateLock<'info>>,
         lock_id: u64,
         amount: u64,
         unlock_ts: i64,
@@ -141,18 +149,16 @@ pub mod holder_locker {
         }
 
         // 3) Move the tokens into the vault (ATA owned by the vault authority PDA).
-        token_interface::transfer_checked(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                TransferChecked {
-                    from: ctx.accounts.owner_token_account.to_account_info(),
-                    mint: ctx.accounts.mint.to_account_info(),
-                    to: ctx.accounts.vault.to_account_info(),
-                    authority: ctx.accounts.owner.to_account_info(),
-                },
-            ),
+        transfer_tokens(
+            &ctx.accounts.token_program.to_account_info(),
+            &ctx.accounts.owner_token_account.to_account_info(),
+            &ctx.accounts.mint.to_account_info(),
+            &ctx.accounts.vault.to_account_info(),
+            &ctx.accounts.owner.to_account_info(),
             amount,
             ctx.accounts.mint.decimals,
+            ctx.remaining_accounts,
+            &[],
         )?;
 
         // 4) Record the lock.
@@ -201,25 +207,24 @@ pub mod holder_locker {
     }
 
     /// Add more tokens to an existing, not-yet-withdrawn lock. No fee.
-    pub fn top_up(ctx: Context<TopUp>, amount: u64) -> Result<()> {
+    /// Remaining accounts: transfer-hook accounts for `mint`, if any.
+    pub fn top_up<'info>(ctx: Context<'_, '_, 'info, 'info, TopUp<'info>>, amount: u64) -> Result<()> {
         require!(amount > 0, LockerError::ZeroAmount);
-        let lock = &mut ctx.accounts.lock;
-        require!(!lock.withdrawn, LockerError::AlreadyWithdrawn);
+        require!(!ctx.accounts.lock.withdrawn, LockerError::AlreadyWithdrawn);
 
-        token_interface::transfer_checked(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                TransferChecked {
-                    from: ctx.accounts.owner_token_account.to_account_info(),
-                    mint: ctx.accounts.mint.to_account_info(),
-                    to: ctx.accounts.vault.to_account_info(),
-                    authority: ctx.accounts.owner.to_account_info(),
-                },
-            ),
+        transfer_tokens(
+            &ctx.accounts.token_program.to_account_info(),
+            &ctx.accounts.owner_token_account.to_account_info(),
+            &ctx.accounts.mint.to_account_info(),
+            &ctx.accounts.vault.to_account_info(),
+            &ctx.accounts.owner.to_account_info(),
             amount,
             ctx.accounts.mint.decimals,
+            ctx.remaining_accounts,
+            &[],
         )?;
 
+        let lock = &mut ctx.accounts.lock;
         lock.amount = lock
             .amount
             .checked_add(amount)
@@ -269,7 +274,8 @@ pub mod holder_locker {
     /// vault token account (rent goes back to the owner). The lock account is
     /// kept so late-arriving rewards can still be claimed; use `close_lock`
     /// afterwards to reclaim its rent.
-    pub fn withdraw(ctx: Context<Withdraw>) -> Result<()> {
+    /// Remaining accounts: transfer-hook accounts for `mint`, if any.
+    pub fn withdraw<'info>(ctx: Context<'_, '_, 'info, 'info, Withdraw<'info>>) -> Result<()> {
         let lock = &ctx.accounts.lock;
         require!(!lock.withdrawn, LockerError::AlreadyWithdrawn);
         let now = Clock::get()?.unix_timestamp;
@@ -281,19 +287,16 @@ pub mod holder_locker {
 
         let vault_balance = ctx.accounts.vault.amount;
         if vault_balance > 0 {
-            token_interface::transfer_checked(
-                CpiContext::new_with_signer(
-                    ctx.accounts.token_program.to_account_info(),
-                    TransferChecked {
-                        from: ctx.accounts.vault.to_account_info(),
-                        mint: ctx.accounts.mint.to_account_info(),
-                        to: ctx.accounts.owner_token_account.to_account_info(),
-                        authority: ctx.accounts.vault_authority.to_account_info(),
-                    },
-                    signer,
-                ),
+            transfer_tokens(
+                &ctx.accounts.token_program.to_account_info(),
+                &ctx.accounts.vault.to_account_info(),
+                &ctx.accounts.mint.to_account_info(),
+                &ctx.accounts.owner_token_account.to_account_info(),
+                &ctx.accounts.vault_authority.to_account_info(),
                 vault_balance,
                 ctx.accounts.mint.decimals,
+                ctx.remaining_accounts,
+                signer,
             )?;
         }
 
@@ -328,7 +331,7 @@ pub mod holder_locker {
 
     /// Sweep every lamport above the rent reserve that pump.fun (or anyone)
     /// sent to the vault authority. `reward_fee_bps` goes to the treasury, the
-    /// rest to the owner. If the lock is boost-enrolled and the mint's
+    /// rest to the owner. If the lock is boost-enrolled and the mint's SOL
     /// `BoostPool` is passed, the bonus is paid on top from the pool.
     pub fn claim_sol_rewards(ctx: Context<ClaimSolRewards>) -> Result<()> {
         let lock = &ctx.accounts.lock;
@@ -379,16 +382,12 @@ pub mod holder_locker {
         let mut bonus: u64 = 0;
         if let Some(pool) = ctx.accounts.boost_pool.as_mut() {
             require_keys_eq!(pool.mint, lock.mint, LockerError::BoostPoolMintMismatch);
-            if pool.active && lock.boosted_amount > 0 && lock.amount > 0 && !lock.withdrawn {
-                let wanted = (payout as u128)
-                    .checked_mul(lock.bonus_bps as u128)
-                    .and_then(|v| v.checked_mul(lock.boosted_amount as u128))
-                    .ok_or(LockerError::MathOverflow)?
-                    / (BPS_DENOMINATOR as u128 * lock.amount as u128);
+            if pool.pays_sol() {
+                let wanted = bonus_for(lock, payout)?;
                 let pool_info = pool.to_account_info();
                 let pool_reserve = Rent::get()?.minimum_balance(pool_info.data_len());
                 let available = pool_info.lamports().saturating_sub(pool_reserve);
-                bonus = (wanted as u64).min(available);
+                bonus = if pool.active { wanted.min(available) } else { 0 };
                 if bonus > 0 {
                     **pool_info.try_borrow_mut_lamports()? -= bonus;
                     **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? += bonus;
@@ -435,7 +434,12 @@ pub mod holder_locker {
     /// Same as `claim_sol_rewards` but for an SPL / Token-2022 token that was
     /// sent to the vault authority (e.g. a token-quoted coin's rewards). The
     /// locked mint itself is refused so this can never bypass the time-lock.
-    pub fn claim_token_rewards(ctx: Context<ClaimTokenRewards>) -> Result<()> {
+    /// If the mint's `BoostPool` pays in `reward_mint`, pass it together with
+    /// its token account to receive the bonus.
+    /// Remaining accounts: transfer-hook accounts for `reward_mint`, if any.
+    pub fn claim_token_rewards<'info>(
+        ctx: Context<'_, '_, 'info, 'info, ClaimTokenRewards<'info>>,
+    ) -> Result<()> {
         let lock = &ctx.accounts.lock;
         let config = &ctx.accounts.config;
 
@@ -450,35 +454,29 @@ pub mod holder_locker {
         let decimals = ctx.accounts.reward_mint.decimals;
 
         if fee > 0 {
-            token_interface::transfer_checked(
-                CpiContext::new_with_signer(
-                    ctx.accounts.reward_token_program.to_account_info(),
-                    TransferChecked {
-                        from: ctx.accounts.reward_vault.to_account_info(),
-                        mint: ctx.accounts.reward_mint.to_account_info(),
-                        to: ctx.accounts.treasury_token_account.to_account_info(),
-                        authority: ctx.accounts.vault_authority.to_account_info(),
-                    },
-                    signer,
-                ),
+            transfer_tokens(
+                &ctx.accounts.reward_token_program.to_account_info(),
+                &ctx.accounts.reward_vault.to_account_info(),
+                &ctx.accounts.reward_mint.to_account_info(),
+                &ctx.accounts.treasury_token_account.to_account_info(),
+                &ctx.accounts.vault_authority.to_account_info(),
                 fee,
                 decimals,
+                ctx.remaining_accounts,
+                signer,
             )?;
         }
         if payout > 0 {
-            token_interface::transfer_checked(
-                CpiContext::new_with_signer(
-                    ctx.accounts.reward_token_program.to_account_info(),
-                    TransferChecked {
-                        from: ctx.accounts.reward_vault.to_account_info(),
-                        mint: ctx.accounts.reward_mint.to_account_info(),
-                        to: ctx.accounts.owner_token_account.to_account_info(),
-                        authority: ctx.accounts.vault_authority.to_account_info(),
-                    },
-                    signer,
-                ),
+            transfer_tokens(
+                &ctx.accounts.reward_token_program.to_account_info(),
+                &ctx.accounts.reward_vault.to_account_info(),
+                &ctx.accounts.reward_mint.to_account_info(),
+                &ctx.accounts.owner_token_account.to_account_info(),
+                &ctx.accounts.vault_authority.to_account_info(),
                 payout,
                 decimals,
+                ctx.remaining_accounts,
+                signer,
             )?;
         }
 
@@ -493,6 +491,44 @@ pub mod holder_locker {
             signer,
         ))?;
 
+        // Boost bonus in the reward token, paid from the pool's token account.
+        let mut bonus: u64 = 0;
+        if let (Some(pool), Some(pool_ta)) = (
+            ctx.accounts.boost_pool.as_mut(),
+            ctx.accounts.boost_pool_token_account.as_ref(),
+        ) {
+            require_keys_eq!(pool.mint, lock.mint, LockerError::BoostPoolMintMismatch);
+            if pool.active && pool.reward_mint == ctx.accounts.reward_mint.key() {
+                let wanted = bonus_for(lock, payout)?;
+                bonus = wanted.min(pool_ta.amount);
+                if bonus > 0 {
+                    let pool_seeds: &[&[u8]] = &[BOOST_SEED, lock.mint.as_ref(), &[pool.bump]];
+                    let pool_signer: &[&[&[u8]]] = &[pool_seeds];
+                    transfer_tokens(
+                        &ctx.accounts.reward_token_program.to_account_info(),
+                        &pool_ta.to_account_info(),
+                        &ctx.accounts.reward_mint.to_account_info(),
+                        &ctx.accounts.owner_token_account.to_account_info(),
+                        &pool.to_account_info(),
+                        bonus,
+                        decimals,
+                        ctx.remaining_accounts,
+                        pool_signer,
+                    )?;
+                    pool.total_bonus_paid = pool
+                        .total_bonus_paid
+                        .checked_add(bonus)
+                        .ok_or(LockerError::MathOverflow)?;
+                }
+            }
+        }
+
+        let lock = &mut ctx.accounts.lock;
+        lock.bonus_paid = lock
+            .bonus_paid
+            .checked_add(bonus)
+            .ok_or(LockerError::MathOverflow)?;
+
         emit!(RewardsClaimed {
             lock: lock.key(),
             owner: lock.owner,
@@ -500,7 +536,7 @@ pub mod holder_locker {
             gross: claimable,
             fee,
             payout,
-            bonus: 0,
+            bonus,
         });
         Ok(())
     }
@@ -556,6 +592,9 @@ pub mod holder_locker {
 
     /// Admin: create a boost pool for `mint`. `capacity` is in raw token
     /// units, `min_duration` in seconds, `bonus_bps` 10_000 = +100% (2x).
+    /// Pass `reward_mint` to pay bonuses in that token instead of SOL; the
+    /// pool's associated token account for it must then be created (anyone
+    /// can, it is just an ATA owned by the pool PDA) and funded by transfer.
     pub fn create_boost_pool(
         ctx: Context<CreateBoostPool>,
         capacity: u64,
@@ -574,6 +613,18 @@ pub mod holder_locker {
         pool.total_bonus_paid = 0;
         pool.active = true;
         pool.bump = ctx.bumps.boost_pool;
+        match (&ctx.accounts.reward_mint, &ctx.accounts.reward_token_program) {
+            (Some(rm), Some(tp)) => {
+                require_keys_eq!(rm.to_account_info().owner.key(), tp.key(), LockerError::RewardMintProgramMismatch);
+                pool.reward_mint = rm.key();
+                pool.reward_token_program = tp.key();
+            }
+            (None, None) => {
+                pool.reward_mint = Pubkey::default();
+                pool.reward_token_program = Pubkey::default();
+            }
+            _ => return err!(LockerError::RewardMintProgramMismatch),
+        }
         Ok(())
     }
 
@@ -600,7 +651,7 @@ pub mod holder_locker {
         Ok(())
     }
 
-    /// Anyone: deposit SOL that funds the bonus payouts.
+    /// Anyone: deposit SOL that funds the bonus payouts of a SOL pool.
     pub fn fund_boost_pool(ctx: Context<FundBoostPool>, lamports: u64) -> Result<()> {
         require!(lamports > 0, LockerError::ZeroAmount);
         system_program::transfer(
@@ -631,7 +682,34 @@ pub mod holder_locker {
         **ctx.accounts.authority.to_account_info().try_borrow_mut_lamports()? += lamports;
         Ok(())
     }
+
+    /// Pool authority: take unspent reward tokens back out of a token pool.
+    /// Remaining accounts: transfer-hook accounts for `reward_mint`, if any.
+    pub fn withdraw_boost_pool_tokens<'info>(
+        ctx: Context<'_, '_, 'info, 'info, WithdrawBoostPoolTokens<'info>>,
+        amount: u64,
+    ) -> Result<()> {
+        require!(amount > 0 && amount <= ctx.accounts.pool_token_account.amount, LockerError::InsufficientPoolFunds);
+        let pool = &ctx.accounts.boost_pool;
+        let pool_seeds: &[&[u8]] = &[BOOST_SEED, pool.mint.as_ref(), &[pool.bump]];
+        let pool_signer: &[&[&[u8]]] = &[pool_seeds];
+        transfer_tokens(
+            &ctx.accounts.reward_token_program.to_account_info(),
+            &ctx.accounts.pool_token_account.to_account_info(),
+            &ctx.accounts.reward_mint.to_account_info(),
+            &ctx.accounts.authority_token_account.to_account_info(),
+            &pool.to_account_info(),
+            amount,
+            ctx.accounts.reward_mint.decimals,
+            ctx.remaining_accounts,
+            pool_signer,
+        )
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 /// Split `gross` into (fee, payout) using basis points.
 fn split_fee(gross: u64, fee_bps: u16) -> Result<(u64, u64)> {
@@ -641,6 +719,19 @@ fn split_fee(gross: u64, fee_bps: u16) -> Result<(u64, u64)> {
         / BPS_DENOMINATOR as u128;
     let fee = fee as u64;
     Ok((fee, gross - fee))
+}
+
+/// Bonus a lock earns on a net payout: bonus_bps scaled by the enrolled share.
+fn bonus_for(lock: &Lock, payout: u64) -> Result<u64> {
+    if lock.withdrawn || lock.amount == 0 || lock.boosted_amount == 0 || lock.bonus_bps == 0 {
+        return Ok(0);
+    }
+    let wanted = (payout as u128)
+        .checked_mul(lock.bonus_bps as u128)
+        .and_then(|v| v.checked_mul(lock.boosted_amount as u128))
+        .ok_or(LockerError::MathOverflow)?
+        / (BPS_DENOMINATOR as u128 * lock.amount as u128);
+    Ok(wanted as u64)
 }
 
 /// Enroll up to `amount` tokens into the pool if the lock is long enough.
@@ -653,6 +744,58 @@ fn enroll_boost(pool: &mut Account<BoostPool>, amount: u64, remaining_duration: 
     let enrolled = amount.min(room);
     pool.enrolled += enrolled;
     enrolled
+}
+
+/// `transfer_checked` for both token programs. For Token-2022 the SPL on-chain
+/// helper is used, which resolves transfer-hook extra accounts from
+/// `remaining` when the mint has a hook (and ignores them when it does not).
+#[allow(clippy::too_many_arguments)]
+fn transfer_tokens<'info>(
+    token_program: &AccountInfo<'info>,
+    from: &AccountInfo<'info>,
+    mint: &AccountInfo<'info>,
+    to: &AccountInfo<'info>,
+    authority: &AccountInfo<'info>,
+    amount: u64,
+    decimals: u8,
+    remaining: &[AccountInfo<'info>],
+    signer_seeds: &[&[&[u8]]],
+) -> Result<()> {
+    if token_program.key() == anchor_spl::token::ID {
+        token_interface::transfer_checked(
+            CpiContext::new_with_signer(
+                token_program.clone(),
+                TransferChecked {
+                    from: from.clone(),
+                    mint: mint.clone(),
+                    to: to.clone(),
+                    authority: authority.clone(),
+                },
+                signer_seeds,
+            ),
+            amount,
+            decimals,
+        )
+    } else {
+        spl_token_2022::onchain::invoke_transfer_checked(
+            token_program.key,
+            from.clone(),
+            mint.clone(),
+            to.clone(),
+            authority.clone(),
+            remaining,
+            amount,
+            decimals,
+            signer_seeds,
+        )
+        .map_err(Into::into)
+    }
+}
+
+impl BoostPool {
+    pub fn pays_sol(&self) -> bool {
+        self.reward_mint == Pubkey::default()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -750,9 +893,9 @@ pub struct TopUp<'info> {
         has_one = token_program,
         has_one = vault_authority,
     )]
-    pub lock: Account<'info, Lock>,
+    pub lock: Box<Account<'info, Lock>>,
 
-    pub mint: InterfaceAccount<'info, Mint>,
+    pub mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         mut,
@@ -760,7 +903,7 @@ pub struct TopUp<'info> {
         token::authority = owner,
         token::token_program = token_program,
     )]
-    pub owner_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub owner_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// CHECK: validated by has_one on the lock.
     pub vault_authority: UncheckedAccount<'info>,
@@ -771,10 +914,10 @@ pub struct TopUp<'info> {
         associated_token::authority = vault_authority,
         associated_token::token_program = token_program,
     )]
-    pub vault: InterfaceAccount<'info, TokenAccount>,
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(mut, seeds = [BOOST_SEED, mint.key().as_ref()], bump = boost_pool.bump)]
-    pub boost_pool: Option<Account<'info, BoostPool>>,
+    pub boost_pool: Option<Box<Account<'info, BoostPool>>>,
 
     pub token_program: Interface<'info, TokenInterface>,
 }
@@ -805,9 +948,9 @@ pub struct Withdraw<'info> {
         has_one = token_program,
         has_one = vault_authority,
     )]
-    pub lock: Account<'info, Lock>,
+    pub lock: Box<Account<'info, Lock>>,
 
-    pub mint: InterfaceAccount<'info, Mint>,
+    pub mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
         init_if_needed,
@@ -816,7 +959,7 @@ pub struct Withdraw<'info> {
         associated_token::authority = owner,
         associated_token::token_program = token_program,
     )]
-    pub owner_token_account: InterfaceAccount<'info, TokenAccount>,
+    pub owner_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     /// CHECK: validated by has_one + seeds.
     #[account(mut, seeds = [VAULT_SEED, lock.key().as_ref()], bump = lock.vault_bump)]
@@ -828,10 +971,10 @@ pub struct Withdraw<'info> {
         associated_token::authority = vault_authority,
         associated_token::token_program = token_program,
     )]
-    pub vault: InterfaceAccount<'info, TokenAccount>,
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(mut, seeds = [BOOST_SEED, mint.key().as_ref()], bump = boost_pool.bump)]
-    pub boost_pool: Option<Account<'info, BoostPool>>,
+    pub boost_pool: Option<Box<Account<'info, BoostPool>>>,
 
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -872,7 +1015,7 @@ pub struct ClaimSolRewards<'info> {
 #[derive(Accounts)]
 pub struct ClaimTokenRewards<'info> {
     #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = treasury)]
-    pub config: Account<'info, Config>,
+    pub config: Box<Account<'info, Config>>,
 
     /// CHECK: validated against config.treasury via has_one.
     pub treasury: UncheckedAccount<'info>,
@@ -881,19 +1024,20 @@ pub struct ClaimTokenRewards<'info> {
     pub owner: Signer<'info>,
 
     #[account(
+        mut,
         seeds = [LOCK_SEED, owner.key().as_ref(), &lock.lock_id.to_le_bytes()],
         bump = lock.bump,
         has_one = owner,
         has_one = vault_authority,
         constraint = reward_mint.key() != lock.mint @ LockerError::CannotClaimLockedMint,
     )]
-    pub lock: Account<'info, Lock>,
+    pub lock: Box<Account<'info, Lock>>,
 
     /// CHECK: validated by has_one + seeds.
     #[account(mut, seeds = [VAULT_SEED, lock.key().as_ref()], bump = lock.vault_bump)]
     pub vault_authority: UncheckedAccount<'info>,
 
-    // Boxed: four token-interface accounts + two init_if_needed overflow the 4 KB BPF stack.
+    // Boxed: several token-interface accounts + init_if_needed overflow the 4 KB BPF stack.
     pub reward_mint: Box<InterfaceAccount<'info, Mint>>,
 
     #[account(
@@ -921,6 +1065,19 @@ pub struct ClaimTokenRewards<'info> {
         associated_token::token_program = reward_token_program,
     )]
     pub treasury_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
+
+    /// Optional: the locked mint's boost pool (only pays if it rewards in `reward_mint`).
+    #[account(mut, seeds = [BOOST_SEED, lock.mint.as_ref()], bump = boost_pool.bump)]
+    pub boost_pool: Option<Box<Account<'info, BoostPool>>>,
+
+    /// Optional: the pool's token account for `reward_mint`.
+    #[account(
+        mut,
+        associated_token::mint = reward_mint,
+        associated_token::authority = boost_pool,
+        associated_token::token_program = reward_token_program,
+    )]
+    pub boost_pool_token_account: Option<Box<InterfaceAccount<'info, TokenAccount>>>,
 
     pub reward_token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -962,7 +1119,7 @@ pub struct CreateBoostPool<'info> {
     pub config: Account<'info, Config>,
     #[account(mut)]
     pub admin: Signer<'info>,
-    pub mint: InterfaceAccount<'info, Mint>,
+    pub mint: Box<InterfaceAccount<'info, Mint>>,
     #[account(
         init,
         payer = admin,
@@ -970,7 +1127,11 @@ pub struct CreateBoostPool<'info> {
         seeds = [BOOST_SEED, mint.key().as_ref()],
         bump
     )]
-    pub boost_pool: Account<'info, BoostPool>,
+    pub boost_pool: Box<Account<'info, BoostPool>>,
+    /// Optional: pay bonuses in this token instead of SOL.
+    pub reward_mint: Option<Box<InterfaceAccount<'info, Mint>>>,
+    /// Optional: token program of `reward_mint`.
+    pub reward_token_program: Option<Interface<'info, TokenInterface>>,
     pub system_program: Program<'info, System>,
 }
 
@@ -985,6 +1146,39 @@ pub struct BoostPoolAuthority<'info> {
         has_one = authority,
     )]
     pub boost_pool: Account<'info, BoostPool>,
+}
+
+#[derive(Accounts)]
+pub struct WithdrawBoostPoolTokens<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        seeds = [BOOST_SEED, boost_pool.mint.as_ref()],
+        bump = boost_pool.bump,
+        has_one = authority,
+        has_one = reward_mint,
+        has_one = reward_token_program,
+    )]
+    pub boost_pool: Box<Account<'info, BoostPool>>,
+    pub reward_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(
+        mut,
+        associated_token::mint = reward_mint,
+        associated_token::authority = boost_pool,
+        associated_token::token_program = reward_token_program,
+    )]
+    pub pool_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        init_if_needed,
+        payer = authority,
+        associated_token::mint = reward_mint,
+        associated_token::authority = authority,
+        associated_token::token_program = reward_token_program,
+    )]
+    pub authority_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub reward_token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -1035,7 +1229,8 @@ pub struct Lock {
     pub boosted_amount: u64,
     /// Bonus rate captured at enrollment time.
     pub bonus_bps: u16,
-    /// Total bonus SOL paid to the owner from the boost pool.
+    /// Total bonus paid to the owner from the boost pool, in the pool's
+    /// reward asset (lamports for SOL pools, raw token units otherwise).
     pub bonus_paid: u64,
     pub bump: u8,
     pub vault_bump: u8,
@@ -1053,9 +1248,14 @@ pub struct BoostPool {
     pub min_duration: i64,
     /// Extra reward, in bps of the net payout. 10_000 = 2x.
     pub bonus_bps: u16,
+    /// Total bonus paid, in the reward asset's units.
     pub total_bonus_paid: u64,
     pub active: bool,
     pub bump: u8,
+    /// Asset bonuses are paid in. `Pubkey::default()` = native SOL held on
+    /// this account; otherwise a mint whose ATA (owned by this PDA) holds it.
+    pub reward_mint: Pubkey,
+    pub reward_token_program: Pubkey,
 }
 
 // ---------------------------------------------------------------------------
@@ -1175,6 +1375,8 @@ pub enum LockerError {
     InvalidDuration,
     #[msg("Insufficient funds in the boost pool")]
     InsufficientPoolFunds,
+    #[msg("Reward mint and reward token program must be passed together and match")]
+    RewardMintProgramMismatch,
     #[msg("Math overflow")]
     MathOverflow,
 }

@@ -286,6 +286,8 @@ describe("holder_locker", () => {
         rewardVault,
         ownerTokenAccount: ata(user.publicKey, rewardMint),
         treasuryTokenAccount: ata(treasury.publicKey, rewardMint),
+        boostPool: null,
+        boostPoolTokenAccount: null,
         rewardTokenProgram: TOKEN_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
@@ -311,6 +313,8 @@ describe("holder_locker", () => {
           rewardVault: ata(vaultAuth, mint),
           ownerTokenAccount: userAta,
           treasuryTokenAccount: ata(treasury.publicKey, mint),
+          boostPool: null,
+          boostPoolTokenAccount: null,
           rewardTokenProgram: TOKEN_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
@@ -468,7 +472,7 @@ describe("holder_locker", () => {
       pool = boostPda(mint);
       await program.methods
         .createBoostPool(capacity, new BN(2), 10_000) // min 2s lock, +100%
-        .accounts({ admin: admin.publicKey, mint })
+        .accountsPartial({ admin: admin.publicKey, mint, rewardMint: null, rewardTokenProgram: null })
         .rpc();
       await program.methods
         .fundBoostPool(new BN(0.3 * LAMPORTS_PER_SOL))
@@ -484,7 +488,7 @@ describe("holder_locker", () => {
       try {
         await program.methods
           .createBoostPool(capacity, new BN(2), 10_000)
-          .accounts({ admin: user.publicKey, mint: mint22 })
+          .accountsPartial({ admin: user.publicKey, mint: mint22, rewardMint: null, rewardTokenProgram: null })
           .signers([user])
           .rpc();
         assert.fail("should fail");
@@ -573,6 +577,74 @@ describe("holder_locker", () => {
         .rpc();
       const lk = await program.account.lock.fetch(l);
       assert.equal(lk.boostedAmount.toNumber(), 0);
+    });
+
+    it("token-denominated pool pays the bonus in the reward token", async () => {
+      // fresh locked mint with its own pool that rewards in rewardMint9 (a 9-decimal SPL token)
+      const mintB = await createMint(conn, admin, admin.publicKey, null, decimals);
+      const userB = (await getOrCreateAssociatedTokenAccount(conn, admin, mintB, user.publicKey)).address;
+      await mintTo(conn, admin, mintB, userB, admin, 1_000 * 10 ** decimals);
+      const rewardMint9 = await createMint(conn, admin, admin.publicKey, null, 9);
+      const poolB = boostPda(mintB);
+      await program.methods
+        .createBoostPool(new BN(1_000 * 10 ** decimals), new BN(2), 10_000)
+        .accountsPartial({ admin: admin.publicKey, mint: mintB, rewardMint: rewardMint9, rewardTokenProgram: TOKEN_PROGRAM_ID })
+        .rpc();
+      const pb = await program.account.boostPool.fetch(poolB);
+      assert.ok(pb.rewardMint.equals(rewardMint9));
+      // fund the pool's token account (plain mint/transfer, no instruction needed)
+      const poolAta = (await getOrCreateAssociatedTokenAccount(conn, admin, rewardMint9, poolB, true)).address;
+      await mintTo(conn, admin, rewardMint9, poolAta, admin, 5_000_000_000);
+
+      const id = new BN(79);
+      const l = lockPda(user.publicKey, id);
+      const va = vaultAuthPda(l);
+      await program.methods
+        .createLock(id, new BN(100 * 10 ** decimals), new BN(Math.floor(Date.now() / 1000) + 3600))
+        .accountsPartial({
+          config: configPda, treasury: treasury.publicKey, owner: user.publicKey, mint: mintB,
+          ownerTokenAccount: userB, lock: l, vaultAuthority: va, vault: ata(va, mintB), boostPool: poolB,
+          tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+        })
+        .signers([user]).rpc();
+      assert.equal((await program.account.lock.fetch(l)).boostedAmount.toString(), (100 * 10 ** decimals).toString());
+
+      // simulate a token-quoted distribution: 1.0 reward tokens land on the holder address
+      const rv = (await getOrCreateAssociatedTokenAccount(conn, admin, rewardMint9, va, true)).address;
+      await mintTo(conn, admin, rewardMint9, rv, admin, 1_000_000_000);
+
+      await program.methods
+        .claimTokenRewards()
+        .accountsPartial({
+          config: configPda, treasury: treasury.publicKey, owner: user.publicKey, lock: l, vaultAuthority: va,
+          rewardMint: rewardMint9, rewardVault: rv,
+          ownerTokenAccount: ata(user.publicKey, rewardMint9), treasuryTokenAccount: ata(treasury.publicKey, rewardMint9),
+          boostPool: poolB, boostPoolTokenAccount: poolAta,
+          rewardTokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+        })
+        .signers([user]).rpc();
+      // net 0.98 + 100% bonus (fully enrolled) = 1.96 to owner; fee 0.02 to treasury; pool down by 0.98
+      assert.equal((await getAccount(conn, ata(user.publicKey, rewardMint9))).amount.toString(), "1960000000");
+      assert.equal((await getAccount(conn, ata(treasury.publicKey, rewardMint9))).amount.toString(), "20000000");
+      assert.equal((await getAccount(conn, poolAta)).amount.toString(), "4020000000");
+      const lk = await program.account.lock.fetch(l);
+      assert.equal(lk.bonusPaid.toString(), "980000000");
+
+      // authority pulls leftover tokens out; a stranger cannot
+      try {
+        await program.methods.withdrawBoostPoolTokens(new BN(1)).accountsPartial({
+          authority: user.publicKey, boostPool: poolB, rewardMint: rewardMint9, poolTokenAccount: poolAta,
+          authorityTokenAccount: ata(user.publicKey, rewardMint9), rewardTokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+        }).signers([user]).rpc();
+        assert.fail("should fail");
+      } catch (e: any) { assert.match(e.toString(), /ConstraintHasOne|has one/i); }
+      await program.methods.withdrawBoostPoolTokens(new BN(4_020_000_000)).accountsPartial({
+        authority: admin.publicKey, boostPool: poolB, rewardMint: rewardMint9, poolTokenAccount: poolAta,
+        authorityTokenAccount: ata(admin.publicKey, rewardMint9), rewardTokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+      }).rpc();
+      assert.equal((await getAccount(conn, poolAta)).amount.toString(), "0");
     });
 
     it("authority withdraws leftover pool funds; others cannot", async () => {

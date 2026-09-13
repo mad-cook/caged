@@ -15,6 +15,7 @@ import { getAssociatedTokenAddressSync, ASSOCIATED_TOKEN_PROGRAM_ID } from "@sol
 import idl from "@/idl/holder_locker.json";
 import type { HolderLocker } from "@/idl/holder_locker";
 import { PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, VAULT_RESERVE_LAMPORTS } from "./constants";
+import { hookRemainingAccounts } from "./hooks";
 
 export type LockAccount = {
   publicKey: PublicKey;
@@ -58,7 +59,14 @@ export type BoostPoolAccount = {
   totalBonusPaid: BN;
   active: boolean;
   lamports: number;
+  /** PublicKey.default = pays SOL; otherwise the mint bonuses are paid in */
+  rewardMint: PublicKey;
+  rewardTokenProgram: PublicKey;
 };
+
+export function poolPaysSol(p: BoostPoolAccount | null | undefined): boolean {
+  return !!p && p.rewardMint.equals(PublicKey.default);
+}
 
 /** Minimal wallet shape AnchorProvider needs (wallet-adapter's AnchorWallet satisfies it). */
 export interface WalletLike {
@@ -203,6 +211,11 @@ export async function createLockIx(program: Program<HolderLocker>, p: CreateLock
   const lockId = p.lockId ?? new BN(Date.now());
   const lock = lockPda(p.owner, lockId);
   const vaultAuthority = vaultAuthorityPda(lock);
+  const ownerAta = ata(p.owner, p.mint, p.tokenProgram);
+  const vault = ata(vaultAuthority, p.mint, p.tokenProgram);
+  const hooks = await hookRemainingAccounts(program.provider.connection, p.mint, p.tokenProgram, [
+    { source: ownerAta, destination: vault, owner: p.owner, amount: BigInt(p.amount.toString()) },
+  ]);
   const ix = await program.methods
     .createLock(lockId, p.amount, new BN(p.unlockTs))
     .accountsPartial({
@@ -210,20 +223,26 @@ export async function createLockIx(program: Program<HolderLocker>, p: CreateLock
       treasury: p.treasury,
       owner: p.owner,
       mint: p.mint,
-      ownerTokenAccount: ata(p.owner, p.mint, p.tokenProgram),
+      ownerTokenAccount: ownerAta,
       lock,
       vaultAuthority,
-      vault: ata(vaultAuthority, p.mint, p.tokenProgram),
+      vault,
       boostPool: p.boostPool ?? null,
       tokenProgram: p.tokenProgram,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
     })
+    .remainingAccounts(hooks)
     .instruction();
   return { ix, lock, lockId, vaultAuthority };
 }
 
 export async function topUpIx(program: Program<HolderLocker>, l: LockAccount, amount: BN, boostPool?: PublicKey | null) {
+  const ownerAta = ata(l.owner, l.mint, l.tokenProgram);
+  const vault = ata(l.vaultAuthority, l.mint, l.tokenProgram);
+  const hooks = await hookRemainingAccounts(program.provider.connection, l.mint, l.tokenProgram, [
+    { source: ownerAta, destination: vault, owner: l.owner, amount: BigInt(amount.toString()) },
+  ]);
   return program.methods
     .topUp(amount)
     .accountsPartial({
@@ -236,6 +255,7 @@ export async function topUpIx(program: Program<HolderLocker>, l: LockAccount, am
       boostPool: boostPool ?? null,
       tokenProgram: l.tokenProgram,
     })
+    .remainingAccounts(hooks)
     .instruction();
 }
 
@@ -247,6 +267,11 @@ export async function extendLockIx(program: Program<HolderLocker>, l: LockAccoun
 }
 
 export async function withdrawIx(program: Program<HolderLocker>, l: LockAccount, boostPool?: PublicKey | null) {
+  const ownerAta = ata(l.owner, l.mint, l.tokenProgram);
+  const vault = ata(l.vaultAuthority, l.mint, l.tokenProgram);
+  const hooks = await hookRemainingAccounts(program.provider.connection, l.mint, l.tokenProgram, [
+    { source: vault, destination: ownerAta, owner: l.vaultAuthority, amount: BigInt(l.amount.toString()) },
+  ]);
   return program.methods
     .withdraw()
     .accountsPartial({
@@ -261,6 +286,7 @@ export async function withdrawIx(program: Program<HolderLocker>, l: LockAccount,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
     })
+    .remainingAccounts(hooks)
     .instruction();
 }
 
@@ -289,7 +315,20 @@ export async function claimTokenRewardsIx(
   l: LockAccount,
   treasury: PublicKey,
   reward: TokenReward,
+  /** pass the mint's pool when it pays bonuses in this reward token */
+  boostPool?: BoostPoolAccount | null,
 ) {
+  const rewardVault = ata(l.vaultAuthority, reward.mint, reward.tokenProgram);
+  const ownerAta = ata(l.owner, reward.mint, reward.tokenProgram);
+  const treasuryAta = ata(treasury, reward.mint, reward.tokenProgram);
+  const usePool = !!boostPool && boostPool.rewardMint.equals(reward.mint);
+  const poolAta = usePool ? ata(boostPool!.publicKey, reward.mint, reward.tokenProgram) : null;
+  const legs = [
+    { source: rewardVault, destination: treasuryAta, owner: l.vaultAuthority, amount: reward.rawAmount / 50n },
+    { source: rewardVault, destination: ownerAta, owner: l.vaultAuthority, amount: reward.rawAmount },
+  ];
+  if (usePool && poolAta) legs.push({ source: poolAta, destination: ownerAta, owner: boostPool!.publicKey, amount: reward.rawAmount });
+  const hooks = await hookRemainingAccounts(program.provider.connection, reward.mint, reward.tokenProgram, legs);
   return program.methods
     .claimTokenRewards()
     .accountsPartial({
@@ -299,13 +338,16 @@ export async function claimTokenRewardsIx(
       lock: l.publicKey,
       vaultAuthority: l.vaultAuthority,
       rewardMint: reward.mint,
-      rewardVault: ata(l.vaultAuthority, reward.mint, reward.tokenProgram),
-      ownerTokenAccount: ata(l.owner, reward.mint, reward.tokenProgram),
-      treasuryTokenAccount: ata(treasury, reward.mint, reward.tokenProgram),
+      rewardVault,
+      ownerTokenAccount: ownerAta,
+      treasuryTokenAccount: treasuryAta,
+      boostPool: usePool ? boostPool!.publicKey : null,
+      boostPoolTokenAccount: poolAta,
       rewardTokenProgram: reward.tokenProgram,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
     })
+    .remainingAccounts(hooks)
     .instruction();
 }
 

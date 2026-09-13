@@ -12,6 +12,7 @@ import { useProgram } from "@/hooks/useProgram";
 import { useSendTx } from "@/hooks/useSendTx";
 import {
   BoostPoolAccount,
+  poolPaysSol,
   ConfigAccount,
   LockAccount,
   TokenReward,
@@ -95,7 +96,16 @@ export default function LockCard({
   }, [connection, lock, refresh]);
 
   const treasury = config?.treasury;
+  const boostedShare =
+    lock.amount.isZero() || lock.boostedAmount.isZero() ? 0 : lock.boostedAmount.toNumber() / lock.amount.toNumber();
   const boostPk = boost ? boost.publicKey : null;
+  /** only SOL pools pay on SOL claims; token pools pay on the matching token claim */
+  const solPoolPk = poolPaysSol(boost) ? boostPk : null;
+  const tokenBonusEstimate = (r: TokenReward): bigint => {
+    if (!boost || !boost.active || !boost.rewardMint.equals(r.mint) || boostedShare <= 0) return 0n;
+    const net = r.rawAmount - (r.rawAmount * BigInt(config?.rewardFeeBps ?? 200)) / 10_000n;
+    return (net * BigInt(lock.bonusBps) * BigInt(lock.boostedAmount.toString())) / (10_000n * BigInt(lock.amount.toString()));
+  };
 
   async function run(build: () => Promise<any>) {
     const ix = await build();
@@ -110,9 +120,7 @@ export default function LockCard({
   const quoteLabel = pump?.quoteMint ? quoteMeta?.symbol || shortAddr(pump.quoteMint) : "SOL";
   const feePct = config ? config.rewardFeeBps / 100 : 2;
   const netClaim = claimable - Math.floor((claimable * (config?.rewardFeeBps ?? 200)) / 10_000);
-  const boostedShare =
-    lock.amount.isZero() || lock.boostedAmount.isZero() ? 0 : lock.boostedAmount.toNumber() / lock.amount.toNumber();
-  const estBonus = boost && boost.active && boostedShare > 0 ? Math.floor((netClaim * lock.bonusBps * boostedShare) / 10_000) : 0;
+  const estBonus = boost && boost.active && poolPaysSol(boost) && boostedShare > 0 ? Math.floor((netClaim * lock.bonusBps * boostedShare) / 10_000) : 0;
 
   return (
     <div className="card min-w-0 p-5 sm:p-7">
@@ -238,9 +246,11 @@ export default function LockCard({
                 <button
                   className="btn-ghost !px-3 !py-1 text-xs"
                   disabled={busy}
-                  onClick={() => run(() => claimTokenRewardsIx(program, lock, treasury, r))}
+                  onClick={() => run(() => claimTokenRewardsIx(program, lock, treasury, r, boost))}
+                  title={tokenBonusEstimate(r) > 0n ? `+ ~${formatUnits(tokenBonusEstimate(r), r.decimals, 4)} boost bonus from the pool` : undefined}
                 >
                   Claim
+                  {tokenBonusEstimate(r) > 0n && <span className="ml-1 text-ember">+{formatUnits(tokenBonusEstimate(r), r.decimals, 2)}</span>}
                 </button>
               )}
             </div>
@@ -255,7 +265,7 @@ export default function LockCard({
             <button
               className="btn-primary"
               disabled={busy || claimable <= 0 || !treasury}
-              onClick={() => run(() => claimSolRewardsIx(program, lock, treasury!, boostPk))}
+              onClick={() => run(() => claimSolRewardsIx(program, lock, treasury!, solPoolPk))}
               title={`You receive ${lamportsToSol(netClaim, 5)} SOL after the ${feePct}% fee${
                 estBonus > 0 ? ` + ~${lamportsToSol(estBonus, 5)} SOL boost bonus` : ""
               }`}

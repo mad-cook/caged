@@ -11,7 +11,9 @@ import BrandMark from "./BrandMark";
 import WalletButton from "./WalletButton";
 import { useProgram } from "@/hooks/useProgram";
 import { useSendTx } from "@/hooks/useSendTx";
-import { WalletToken } from "@/lib/tokens";
+import { WalletToken, fetchTokenMeta } from "@/lib/tokens";
+import { QuoteAssetInfo, inspectQuoteAsset } from "@/lib/hooks";
+import { useConnection } from "@solana/wallet-adapter-react";
 import { BoostPoolAccount, ConfigAccount, createLockIx, fetchBoostPool, fetchConfig } from "@/lib/program";
 import { formatUnits, lamportsToSol, parseUnits, toDatetimeLocal, durationLabel } from "@/lib/format";
 import { EXPLORER } from "@/lib/constants";
@@ -37,6 +39,10 @@ export default function CreateLockForm() {
   const [unlockLocal, setUnlockLocal] = useState(() => toDatetimeLocal(Math.floor(Date.now() / 1000) + 30 * 86400));
   const [config, setConfig] = useState<ConfigAccount | null>(null);
   const [boost, setBoost] = useState<BoostPoolAccount | null>(null);
+  const [boostAssetSymbol, setBoostAssetSymbol] = useState<string>("SOL");
+  const [quoteInfo, setQuoteInfo] = useState<QuoteAssetInfo | null>(null);
+  const [quoteSymbol, setQuoteSymbol] = useState<string>("");
+  const { connection } = useConnection();
   const [created, setCreated] = useState<{ lock: string; sig: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -46,8 +52,23 @@ export default function CreateLockForm() {
 
   useEffect(() => {
     if (!token) return setBoost(null);
-    fetchBoostPool(program, new PublicKey(token.mint)).then(setBoost).catch(() => setBoost(null));
-  }, [program, token]);
+    fetchBoostPool(program, new PublicKey(token.mint))
+      .then(async (b) => {
+        setBoost(b);
+        if (b && !b.rewardMint.equals(PublicKey.default)) {
+          const m = await fetchTokenMeta([b.rewardMint.toBase58()]);
+          setBoostAssetSymbol(m.get(b.rewardMint.toBase58())?.symbol || b.rewardMint.toBase58().slice(0, 4));
+        } else setBoostAssetSymbol("SOL");
+      })
+      .catch(() => setBoost(null));
+    setQuoteInfo(null);
+    setQuoteSymbol("");
+    if (token.pump.isHolderReward && token.pump.quoteMint) {
+      const q = new PublicKey(token.pump.quoteMint);
+      inspectQuoteAsset(connection, q).then(setQuoteInfo).catch(() => null);
+      fetchTokenMeta([q.toBase58()]).then((m) => setQuoteSymbol(m.get(q.toBase58())?.symbol || "")).catch(() => null);
+    }
+  }, [program, token, connection]);
 
   const unlockTs = useMemo(() => Math.floor(new Date(unlockLocal).getTime() / 1000), [unlockLocal]);
   const nowTs = Math.floor(Date.now() / 1000);
@@ -173,7 +194,7 @@ export default function CreateLockForm() {
             }`}
           >
             <div className="font-semibold">
-              ◇ Reward boost: +{boost.bonusBps / 100}% for locks ≥ {durationLabel(boost.minDuration.toNumber())}
+              ◇ Reward boost: +{boost.bonusBps / 100}% for locks ≥ {durationLabel(boost.minDuration.toNumber())}, paid in {boostAssetSymbol}
             </div>
             <div className="text-xs text-slate-300">
               {boostEligible
@@ -184,6 +205,17 @@ export default function CreateLockForm() {
                   ? "Boost capacity is full."
                   : `Lock for at least ${durationLabel(boost.minDuration.toNumber())} to qualify.`}
             </div>
+          </div>
+        )}
+
+        {quoteInfo && (
+          <div className={`rounded-xl border px-3 py-2.5 text-xs ${quoteInfo.restricted ? "border-ember/50 bg-ember/10 text-ember" : "border-ink-600 bg-ink-800/60 text-slate-300"}`}>
+            <div className="font-semibold">Rewards for this coin are paid in {quoteSymbol || quoteInfo.mint.slice(0, 6)}</div>
+            {quoteInfo.restricted ? (
+              <div className="mt-1">Warning: {quoteInfo.reasons.join("; ")}. Distributions may not reach any locker, including this one.</div>
+            ) : quoteInfo.issuerControls.length > 0 ? (
+              <div className="mt-1 text-slate-400">Issuer-controlled asset: {quoteInfo.issuerControls.join(", ")}. Claims work today; the issuer could change that.</div>
+            ) : null}
           </div>
         )}
 

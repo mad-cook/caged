@@ -98,15 +98,25 @@ export default function TokenPage() {
       {data.boostPool && (
         <div className={`card p-4 ${data.boostPool.active ? "border-acid/40" : ""}`}>
           <div className="font-semibold">
-            ◇ Reward boost: +{data.boostPool.bonusBps / 100}% for locks ≥ {durationLabel(data.boostPool.minDurationSeconds)}
+            ◇ Reward boost: +{data.boostPool.bonusBps / 100}% for locks ≥ {durationLabel(data.boostPool.minDurationSeconds)}, paid in {data.boostPool.rewardSymbol ?? "SOL"}
             {!data.boostPool.active && <span className="ml-2 text-xs text-slate-400">(inactive)</span>}
           </div>
           <div className="mt-1 grid gap-x-6 gap-y-1 text-sm text-slate-300 sm:grid-cols-3">
             <span>
               Enrolled: {formatUnits(data.boostPool.enrolledRaw, data.decimals, 0)} / {formatUnits(data.boostPool.capacityRaw, data.decimals, 0)}
             </span>
-            <span>Pool balance: {lamportsToSol(data.boostPool.balanceLamports, 3)} SOL</span>
-            <span>Bonus paid: {lamportsToSol(BigInt(data.boostPool.totalBonusPaidLamports), 3)} SOL</span>
+            <span>
+              Pool balance:{" "}
+              {data.boostPool.rewardMint
+                ? `${formatUnits(data.boostPool.balanceRaw, data.boostPool.rewardDecimals ?? 6, 3)} ${data.boostPool.rewardSymbol ?? ""}`
+                : `${lamportsToSol(data.boostPool.balanceLamports, 3)} SOL`}
+            </span>
+            <span>
+              Bonus paid:{" "}
+              {data.boostPool.rewardMint
+                ? `${formatUnits(data.boostPool.totalBonusPaidLamports, data.boostPool.rewardDecimals ?? 6, 3)} ${data.boostPool.rewardSymbol ?? ""}`
+                : `${lamportsToSol(BigInt(data.boostPool.totalBonusPaidLamports), 3)} SOL`}
+            </span>
           </div>
         </div>
       )}

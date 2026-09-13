@@ -5,6 +5,7 @@
 import { BorshAccountsCoder, Idl } from "@coral-xyz/anchor";
 import { Connection, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import idl from "@/idl/holder_locker.json";
 import { PROGRAM_ID } from "@/lib/constants";
 import { getPumpStatuses, PumpStatus } from "@/lib/pump";
@@ -72,8 +73,14 @@ export interface TokenLocksJson {
     minDurationSeconds: number;
     bonusBps: number;
     active: boolean;
+    /** SOL pool: lamports on the account. Token pool: raw balance of the pool token account. */
     balanceLamports: number;
     totalBonusPaidLamports: string;
+    /** null = pays SOL */
+    rewardMint: string | null;
+    rewardSymbol: string | null;
+    rewardDecimals: number | null;
+    balanceRaw: string;
   } | null;
   locks: LockJson[];
   updatedAt: number;
@@ -175,7 +182,24 @@ export async function buildTokenLocks(mint: PublicKey): Promise<TokenLocksJson> 
         active: p.active,
         balanceLamports: boostInfo.lamports,
         totalBonusPaidLamports: p.total_bonus_paid.toString(),
+        rewardMint: null,
+        rewardSymbol: null,
+        rewardDecimals: null,
+        balanceRaw: String(boostInfo.lamports),
       };
+      const rm: PublicKey = p.reward_mint;
+      if (!rm.equals(PublicKey.default)) {
+        const tp: PublicKey = p.reward_token_program;
+        const poolAta = getAssociatedTokenAddressSync(rm, boostPda, true, tp);
+        const [bal, qm] = await Promise.all([
+          conn.getTokenAccountBalance(poolAta, "confirmed").catch(() => null),
+          fetchMeta(rm.toBase58()),
+        ]);
+        boostPool.rewardMint = rm.toBase58();
+        boostPool.rewardSymbol = qm.symbol;
+        boostPool.rewardDecimals = bal?.value.decimals ?? qm.decimals;
+        boostPool.balanceRaw = bal?.value.amount ?? "0";
+      }
     } catch {
       boostPool = null;
     }

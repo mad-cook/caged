@@ -18,8 +18,21 @@ Instructions: `initialize`, `update_config`, `create_lock`, `top_up`, `extend_lo
 
 Boost pools are per mint (`["boost", mint]`): `capacity` (raw tokens), `min_duration` (seconds),
 `bonus_bps` (10 000 = +100%). Locks are enrolled at creation or top-up, first come until capacity is
-full; enrolled locks receive `bonus_bps` of their net SOL payout on each claim, pro-rata to the enrolled
-share, paid from the pool's lamports. Capacity is released on withdrawal.
+full; enrolled locks receive `bonus_bps` of their net payout on each claim, pro-rata to the enrolled
+share. Capacity is released on withdrawal. A pool pays in one asset, chosen at creation:
+
+* **SOL pool** (`reward_mint == Pubkey::default()`): lamports live on the pool account, funded with
+  `fund_boost_pool` or a plain transfer; paid on `claim_sol_rewards`.
+* **Token pool** (`reward_mint` set): tokens live in the pool PDA's associated token account, funded by a
+  plain token transfer; paid on `claim_token_rewards` when the claimed mint matches. Use this when the
+  coin is quoted in a token (holder rewards then arrive in that token). `withdraw_boost_pool_tokens`
+  returns leftovers to the authority.
+
+Every token transfer goes through `transfer_tokens`, which calls SPL's on-chain
+`invoke_transfer_checked` for Token-2022 mints, so mints with an active transfer hook work as long as the
+client passes the hook program, its extra-account-meta list and the extra accounts as remaining accounts
+(`web/lib/hooks.ts` resolves them with `addExtraAccountMetasForExecute`). Mints whose hook extension has
+no program set, which is the case for PUMP and the tokenized stocks today, need nothing extra.
 
 ## Toolchain
 
@@ -65,8 +78,11 @@ TREASURY=<fee wallet> LOCK_FEE_SOL=0.1 REWARD_FEE_BPS=200 npm run init
 Boost pool management (`scripts/boost-pool.ts`):
 
 ```bash
-MINT=<mint> ACTION=create CAPACITY_PCT=25 MIN_DAYS=7 BONUS_BPS=10000 npm run boost
-MINT=<mint> ACTION=fund SOL=2 npm run boost          # or just transfer SOL to the pool address
+MINT=<mint> ACTION=create CAPACITY_PCT=25 MIN_DAYS=7 BONUS_BPS=10000 npm run boost                 # SOL pool
+MINT=<mint> ACTION=create CAPACITY_PCT=25 MIN_DAYS=7 BONUS_BPS=10000 REWARD_MINT=<quote> npm run boost  # token pool
+MINT=<mint> ACTION=fund SOL=2 npm run boost          # SOL pool (or just transfer SOL to the pool address)
+MINT=<mint> ACTION=fund AMOUNT=1.5 npm run boost     # token pool (or transfer tokens to the pool's ATA)
+MINT=<mint> ACTION=withdraw SOL=1 npm run boost      # / AMOUNT=1.5 for token pools
 MINT=<mint> ACTION=update ACTIVE=false npm run boost
 MINT=<mint> ACTION=show npm run boost
 ```
