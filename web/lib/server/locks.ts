@@ -9,6 +9,7 @@ import idl from "@/idl/holder_locker.json";
 import { PROGRAM_ID } from "@/lib/constants";
 import { getPumpStatuses, PumpStatus } from "@/lib/pump";
 import { formatUnits } from "@/lib/format";
+import { resolveTokenMeta } from "@/lib/server/meta";
 
 const RPC_URL =
   process.env.RPC_URL ||
@@ -17,10 +18,6 @@ const RPC_URL =
     ? "https://api.devnet.solana.com"
     : "https://api.mainnet-beta.solana.com");
 
-const HELIUS_KEY = process.env.HELIUS_API_KEY;
-const DAS_URL = HELIUS_KEY
-  ? `https://${process.env.NEXT_PUBLIC_CLUSTER === "devnet" ? "devnet" : "mainnet"}.helius-rpc.com/?api-key=${HELIUS_KEY}`
-  : null;
 
 let _conn: Connection | null = null;
 export function serverConnection(): Connection {
@@ -127,25 +124,9 @@ export async function fetchLocksForOwner(owner: PublicKey): Promise<LockJson[]> 
 }
 
 async function fetchMeta(mint: string): Promise<{ name: string | null; symbol: string | null; image: string | null; decimals: number | null }> {
-  if (!DAS_URL) return { name: null, symbol: null, image: null, decimals: null };
-  try {
-    const res = await fetch(DAS_URL, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: "m", method: "getAsset", params: { id: mint } }),
-      cache: "no-store",
-    });
-    const a = (await res.json())?.result;
-    if (!a) return { name: null, symbol: null, image: null, decimals: null };
-    return {
-      name: a.content?.metadata?.name ?? null,
-      symbol: a.content?.metadata?.symbol ?? a.token_info?.symbol ?? null,
-      image: a.content?.links?.image ?? a.content?.files?.[0]?.cdn_uri ?? a.content?.files?.[0]?.uri ?? null,
-      decimals: typeof a.token_info?.decimals === "number" ? a.token_info.decimals : null,
-    };
-  } catch {
-    return { name: null, symbol: null, image: null, decimals: null };
-  }
+  const m = (await resolveTokenMeta([mint])).get(mint);
+  if (!m) return { name: null, symbol: null, image: null, decimals: null };
+  return { name: m.name, symbol: m.symbol, image: m.image, decimals: m.decimals };
 }
 
 export async function buildTokenLocks(mint: PublicKey): Promise<TokenLocksJson> {

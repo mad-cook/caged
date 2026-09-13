@@ -7,6 +7,7 @@ import { PublicKey } from "@solana/web3.js";
 import { BN } from "@coral-xyz/anchor";
 import TxStatus from "./TxStatus";
 import { PumpBadge } from "./TokenPicker";
+import CopyAddress from "./CopyAddress";
 import { useProgram } from "@/hooks/useProgram";
 import { useSendTx } from "@/hooks/useSendTx";
 import {
@@ -133,6 +134,9 @@ export default function LockCard({
               {lock.withdrawn && <span className="badge bg-ink-600 text-slate-300">withdrawn</span>}
             </div>
             <div className="text-xs text-slate-400">{meta?.name}</div>
+            <div className="mt-1.5">
+              <CopyAddress label="CA" address={lock.mint.toBase58()} />
+            </div>
           </div>
         </div>
         <div className="text-right">

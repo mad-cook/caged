@@ -7,6 +7,7 @@ import type { TokenLocksJson } from "@/lib/server/locks";
 import { countdown, durationLabel, formatDate, formatUnits, lamportsToSol, shortAddr } from "@/lib/format";
 import { EXPLORER } from "@/lib/constants";
 import TokenSearch from "@/components/TokenSearch";
+import CopyAddress from "@/components/CopyAddress";
 
 export default function TokenPage() {
   const { mint } = useParams<{ mint: string }>();
@@ -65,9 +66,8 @@ export default function TokenPage() {
               {symbol} <span className="text-base font-medium text-slate-400">{data.name}</span>
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-              <a className="break-all font-mono text-slate-400 underline" href={EXPLORER(data.mint)} target="_blank" rel="noreferrer">
-                {data.mint}
-              </a>
+              <CopyAddress label="CA" address={data.mint} full />
+              <a className="text-slate-400 underline" href={EXPLORER(data.mint)} target="_blank" rel="noreferrer">Solscan ↗</a>
               {data.pump?.isHolderReward && <span className="badge bg-acid/15 text-acid">✦ Holder Rewards</span>}
               {data.pump?.isPump && !data.pump.isHolderReward && (
                 <span className="badge bg-ink-600 text-slate-300">pump.fun</span>
