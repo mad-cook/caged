@@ -85,4 +85,4 @@ web/        Next.js app (site + API)
 tests/      program test suite
 ```
 
-Developer notes are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Developer notes: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Showing Caged locks in your terminal or screener: [docs/INTEGRATION.md](docs/INTEGRATION.md).
