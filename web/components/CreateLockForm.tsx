@@ -15,7 +15,7 @@ import { WalletToken, fetchTokenMeta } from "@/lib/tokens";
 import { QuoteAssetInfo, inspectQuoteAsset } from "@/lib/hooks";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { BoostPoolAccount, ConfigAccount, createLockIx, fetchBoostPool, fetchConfig } from "@/lib/program";
-import { formatUnits, lamportsToSol, parseUnits, toDatetimeLocal, durationLabel } from "@/lib/format";
+import { formatUnits, formatUnitsPlain, lamportsToSol, parseUnits, toDatetimeLocal, durationLabel } from "@/lib/format";
 import { EXPLORER } from "@/lib/constants";
 
 const PRESETS = [
@@ -144,7 +144,7 @@ export default function CreateLockForm() {
               <button
                 type="button"
                 className="mb-1.5 text-xs text-acid hover:underline"
-                onClick={() => setAmount(formatUnits(token.rawAmount, token.decimals, token.decimals))}
+                onClick={() => setAmount(formatUnitsPlain(token.rawAmount, token.decimals))}
               >
                 Max {formatUnits(token.rawAmount, token.decimals)}
               </button>

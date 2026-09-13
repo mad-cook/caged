@@ -24,9 +24,33 @@ export function formatUnits(raw: bigint | BN | string, decimals: number, maxFrac
   return fracStr ? `${wholeStr}.${fracStr}` : wholeStr;
 }
 
-/** human string -> raw bigint; throws on bad input */
+/** raw u64 -> plain "1234567.89" with no grouping and a dot decimal (safe to feed back into parseUnits) */
+export function formatUnitsPlain(raw: bigint | BN | string, decimals: number): string {
+  const big = BigInt(raw.toString());
+  const base = 10n ** BigInt(decimals);
+  const whole = big / base;
+  const frac = (big % base).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : whole.toString();
+}
+
+/**
+ * human string -> raw bigint; throws on bad input.
+ * Tolerates thousands separators (comma, space, NBSP, narrow NBSP, apostrophe)
+ * and a comma used as the decimal separator (e.g. "2 000 000", "1,5", "1.234,56").
+ */
 export function parseUnits(value: string, decimals: number): bigint {
-  const v = value.trim().replace(/,/g, "");
+  let v = value.trim().replace(/[\s  ']/g, "");
+  const commas = (v.match(/,/g) || []).length;
+  const dots = (v.match(/\./g) || []).length;
+  if (commas > 0 && dots > 0) {
+    // whichever separator comes last is the decimal one
+    if (v.lastIndexOf(",") > v.lastIndexOf(".")) v = v.replace(/\./g, "").replace(",", ".");
+    else v = v.replace(/,/g, "");
+  } else if (commas === 1 && !/,\d{3}$/.test(v)) {
+    v = v.replace(",", "."); // single comma not followed by exactly 3 digits: decimal comma
+  } else {
+    v = v.replace(/,/g, "");
+  }
   if (!/^\d*(\.\d*)?$/.test(v) || v === "" || v === ".") throw new Error("Invalid amount");
   const [w, f = ""] = v.split(".");
   const fracPadded = (f + "0".repeat(decimals)).slice(0, decimals);
