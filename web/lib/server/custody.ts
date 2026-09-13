@@ -26,6 +26,13 @@ export function custodyEnabled(): boolean {
   return MASTER.length >= 32;
 }
 
+/** Service authority that attests custodial holders on-chain (set via set_custody_authority). */
+export function deriveAuthority(): Keypair {
+  if (!custodyEnabled()) throw new Error("custody not configured (LOCK_MASTER_SECRET)");
+  const seed = createHmac("sha512", Buffer.from(MASTER, "utf8")).update(Buffer.from("caged-custody-authority-v1")).digest().subarray(0, 32);
+  return Keypair.fromSeed(seed);
+}
+
 export function deriveHolder(lock: PublicKey): Keypair {
   if (!custodyEnabled()) throw new Error("custody not configured (LOCK_MASTER_SECRET)");
   const seed = createHmac("sha512", Buffer.from(MASTER, "utf8"))
@@ -89,9 +96,13 @@ export function coSign(lock: PublicKey, txBase64: string): CoSignResult {
   }
   if (programIxs === 0) throw new Error("no program instruction");
   if (!holderUsed) throw new Error("holder is not a signer in this transaction");
-  // the holder must never be the fee payer
-  if (tx.feePayer && tx.feePayer.equals(holder.publicKey)) throw new Error("holder cannot pay fees");
+  // service keys must never be the fee payer
+  if (tx.feePayer && (tx.feePayer.equals(holder.publicKey) || tx.feePayer.equals(deriveAuthority().publicKey))) throw new Error("service key cannot pay fees");
 
   tx.partialSign(holder);
+  // creation / migration also need the custody authority attestation
+  const authority = deriveAuthority();
+  const needsAuthority = tx.instructions.some((ix) => ix.keys.some((k) => k.pubkey.equals(authority.publicKey) && k.isSigner));
+  if (needsAuthority) tx.partialSign(authority);
   return { ok: true, tx: tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString("base64"), holder: holder.publicKey.toBase58() };
 }

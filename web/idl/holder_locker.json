@@ -1584,6 +1584,32 @@
           }
         },
         {
+          "name": "custody_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "custody_authority",
+          "docs": [
+            "The Caged custody authority; its signature attests that  is a service-derived key."
+          ],
+          "signer": true
+        },
+        {
           "name": "holder",
           "docs": [
             "On-curve holder key from the Caged signing service; owns the vault and must co-sign."
@@ -2031,6 +2057,32 @@
           }
         },
         {
+          "name": "custody_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "custody_authority",
+          "docs": [
+            "The Caged custody authority; attests that  is a service-derived key."
+          ],
+          "signer": true
+        },
+        {
           "name": "holder",
           "docs": [
             "On-curve holder key from the Caged signing service; must co-sign."
@@ -2111,6 +2163,82 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "set_custody_authority",
+      "docs": [
+        "Admin: set the custody authority, the service key that must co-sign",
+        "every custodial lock creation / migration. This is what proves a lock's",
+        "holder key really belongs to the Caged signing service."
+      ],
+      "discriminator": [
+        133,
+        13,
+        129,
+        226,
+        168,
+        144,
+        110,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "custody_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "authority",
+          "type": "pubkey"
+        }
+      ]
     },
     {
       "name": "top_up",
@@ -3113,6 +3241,19 @@
       ]
     },
     {
+      "name": "CustodyConfig",
+      "discriminator": [
+        241,
+        165,
+        157,
+        31,
+        210,
+        36,
+        248,
+        113
+      ]
+    },
+    {
       "name": "Lock",
       "discriminator": [
         8,
@@ -3315,8 +3456,8 @@
     },
     {
       "code": 6016,
-      "name": "HolderNotOnCurve",
-      "msg": "Holder key must be an on-curve address"
+      "name": "UnauthorizedCustody",
+      "msg": "Custody authority signature missing or wrong"
     },
     {
       "code": 6017,
@@ -3463,6 +3604,25 @@
           {
             "name": "total_rewards_paid",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CustodyConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "docs": [
+              "Service key that must co-sign custodial lock creation and migration."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }

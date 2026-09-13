@@ -22,6 +22,11 @@ import { assert } from "chai";
 import { createHmac } from "crypto";
 const TEST_MASTER = "test-master-secret-do-not-use-in-prod-0123456789";
 /** same derivation as web/lib/server/custody.ts */
+function deriveAuthority(): Keypair {
+  const seed = createHmac("sha512", Buffer.from(TEST_MASTER, "utf8")).update(Buffer.from("caged-custody-authority-v1")).digest().subarray(0, 32);
+  return Keypair.fromSeed(seed);
+}
+const custodyConfigPda = (pid: PublicKey) => PublicKey.findProgramAddressSync([Buffer.from("custody")], pid)[0];
 function deriveHolder(lock: PublicKey): Keypair {
   const seed = createHmac("sha512", Buffer.from(TEST_MASTER, "utf8"))
     .update(Buffer.from("caged-holder-v1"))
@@ -480,6 +485,11 @@ describe("holder_locker", () => {
     let clock: PublicKey;
     let holder: Keypair;
 
+    it("admin sets the custody authority", async () => {
+      await program.methods.setCustodyAuthority(deriveAuthority().publicKey).accountsPartial({ admin: admin.publicKey, config: configPda, custodyConfig: custodyConfigPda(program.programId), systemProgram: SystemProgram.programId }).rpc();
+      assert.ok((await program.account.custodyConfig.fetch(custodyConfigPda(program.programId))).authority.equals(deriveAuthority().publicKey));
+    });
+
     it("creates a custodial lock; holder is an on-curve system account owning the vault", async () => {
       clock = lockPda(user.publicKey, cid);
       holder = deriveHolder(clock);
@@ -488,10 +498,10 @@ describe("holder_locker", () => {
         .createLockCustodial(cid, new BN(1_000 * 10 ** decimals), new BN((await chainNow()) + 30))
         .accountsPartial({
           config: configPda, treasury: treasury.publicKey, owner: user.publicKey, mint, ownerTokenAccount: userAta,
-          lock: clock, holder: holder.publicKey, vault: ata(holder.publicKey, mint), boostPool: null,
+          lock: clock, custodyConfig: custodyConfigPda(program.programId), custodyAuthority: deriveAuthority().publicKey, holder: holder.publicKey, vault: ata(holder.publicKey, mint), boostPool: null,
           tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
         })
-        .signers([user, holder])
+        .signers([user, holder, deriveAuthority()])
         .rpc();
       const l = await program.account.lock.fetch(clock);
       assert.equal(l.vaultBump, 0);
@@ -511,10 +521,10 @@ describe("holder_locker", () => {
           .createLockCustodial(id, new BN(1), new BN((await chainNow()) + 30))
           .accountsPartial({
             config: configPda, treasury: treasury.publicKey, owner: user.publicKey, mint, ownerTokenAccount: userAta,
-            lock: l, holder: h.publicKey, vault: ata(h.publicKey, mint), boostPool: null,
+            lock: l, custodyConfig: custodyConfigPda(program.programId), custodyAuthority: deriveAuthority().publicKey, holder: h.publicKey, vault: ata(h.publicKey, mint), boostPool: null,
             tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
           })
-          .signers([user])
+          .signers([user, deriveAuthority()])
           .rpc();
         assert.fail("should fail");
       } catch (e: any) {
@@ -610,10 +620,10 @@ describe("holder_locker", () => {
       const before = await conn.getBalance(user.publicKey);
       const migrateAccounts = {
         config: configPda, treasury: treasury.publicKey, owner: user.publicKey, lock: l, mint,
-        oldVaultAuthority: va, oldVault: ata(va, mint), holder: h.publicKey, newVault: ata(h.publicKey, mint),
+        oldVaultAuthority: va, oldVault: ata(va, mint), custodyConfig: custodyConfigPda(program.programId), custodyAuthority: deriveAuthority().publicKey, holder: h.publicKey, newVault: ata(h.publicKey, mint),
         tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
       };
-      await program.methods.migrateLockToCustodial().accountsPartial(migrateAccounts).signers([user, h]).rpc();
+      await program.methods.migrateLockToCustodial().accountsPartial(migrateAccounts).signers([user, h, deriveAuthority()]).rpc();
       const lk = await program.account.lock.fetch(l);
       assert.equal(lk.vaultBump, 0);
       assert.ok(lk.vaultAuthority.equals(h.publicKey));
@@ -627,7 +637,7 @@ describe("holder_locker", () => {
       assert.isAbove((await conn.getBalance(user.publicKey)) - before, 0.05 * 0.98 * LAMPORTS_PER_SOL - 3_000_000);
       // cannot migrate twice
       try {
-        await program.methods.migrateLockToCustodial().accountsPartial(migrateAccounts).signers([user, h]).rpc();
+        await program.methods.migrateLockToCustodial().accountsPartial(migrateAccounts).signers([user, h, deriveAuthority()]).rpc();
         assert.fail("should fail");
       } catch (e: any) {
         assert.match(e.toString(), /WrongLockMode|ConstraintSeeds|AccountNotInitialized|seeds constraint/i);

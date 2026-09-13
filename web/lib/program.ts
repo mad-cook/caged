@@ -394,6 +394,22 @@ export function isCustodial(l: LockAccount): boolean {
   return l.vaultBump === 0;
 }
 
+export function custodyConfigPda(): PublicKey {
+  return PublicKey.findProgramAddressSync([Buffer.from("custody")], PROGRAM_ID)[0];
+}
+
+/** Ask the server for the holder key of a lock and the custody authority (public info). */
+export async function fetchCustody(lock: PublicKey): Promise<{ holder: PublicKey; authority: PublicKey }> {
+  const res = await fetch("/api/custody/holder", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ lock: lock.toBase58() }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "custody unavailable");
+  const j = await res.json();
+  return { holder: new PublicKey(j.holder), authority: new PublicKey(j.authority) };
+}
+
 /** Ask the server for the holder key of a lock (deterministic, public info). */
 export async function fetchHolder(lock: PublicKey): Promise<PublicKey> {
   const res = await fetch("/api/custody/holder", {
@@ -408,7 +424,7 @@ export async function fetchHolder(lock: PublicKey): Promise<PublicKey> {
 export async function createLockCustodialIx(program: Program<HolderLocker>, p: CreateLockParams) {
   const lockId = p.lockId ?? new BN(Date.now());
   const lock = lockPda(p.owner, lockId);
-  const holder = await fetchHolder(lock);
+  const { holder, authority } = await fetchCustody(lock);
   const ownerAta = ata(p.owner, p.mint, p.tokenProgram);
   const vault = ata(holder, p.mint, p.tokenProgram);
   const hooks = await hookRemainingAccounts(program.provider.connection, p.mint, p.tokenProgram, [
@@ -423,6 +439,8 @@ export async function createLockCustodialIx(program: Program<HolderLocker>, p: C
       mint: p.mint,
       ownerTokenAccount: ownerAta,
       lock,
+      custodyConfig: custodyConfigPda(),
+      custodyAuthority: authority,
       holder,
       vault,
       boostPool: p.boostPool ?? null,
@@ -436,7 +454,7 @@ export async function createLockCustodialIx(program: Program<HolderLocker>, p: C
 }
 
 export async function migrateLockIx(program: Program<HolderLocker>, l: LockAccount, treasury: PublicKey) {
-  const holder = await fetchHolder(l.publicKey);
+  const { holder, authority } = await fetchCustody(l.publicKey);
   const oldVault = ata(l.vaultAuthority, l.mint, l.tokenProgram);
   const newVault = ata(holder, l.mint, l.tokenProgram);
   const hooks = await hookRemainingAccounts(program.provider.connection, l.mint, l.tokenProgram, [
@@ -452,6 +470,8 @@ export async function migrateLockIx(program: Program<HolderLocker>, l: LockAccou
       mint: l.mint,
       oldVaultAuthority: l.vaultAuthority,
       oldVault,
+      custodyConfig: custodyConfigPda(),
+      custodyAuthority: authority,
       holder,
       newVault,
       tokenProgram: l.tokenProgram,

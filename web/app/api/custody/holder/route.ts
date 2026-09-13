@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PublicKey } from "@solana/web3.js";
-import { custodyEnabled, deriveHolder } from "@/lib/server/custody";
+import { custodyEnabled, deriveAuthority, deriveHolder } from "@/lib/server/custody";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,5 +15,5 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: "bad lock" }, { status: 400 });
   }
-  return NextResponse.json({ holder: deriveHolder(lock).publicKey.toBase58() });
+  return NextResponse.json({ holder: deriveHolder(lock).publicKey.toBase58(), authority: deriveAuthority().publicKey.toBase58() });
 }

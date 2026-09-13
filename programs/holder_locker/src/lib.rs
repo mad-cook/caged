@@ -37,6 +37,7 @@ pub const CONFIG_SEED: &[u8] = b"config";
 pub const LOCK_SEED: &[u8] = b"lock";
 pub const VAULT_SEED: &[u8] = b"vault";
 pub const BOOST_SEED: &[u8] = b"boost";
+pub const CUSTODY_SEED: &[u8] = b"custody";
 
 /// Hard cap on the reward fee the admin may configure (10%).
 pub const MAX_REWARD_FEE_BPS: u16 = 1_000;
@@ -710,6 +711,16 @@ pub mod holder_locker {
         )
     }
 
+    /// Admin: set the custody authority, the service key that must co-sign
+    /// every custodial lock creation / migration. This is what proves a lock's
+    /// holder key really belongs to the Caged signing service.
+    pub fn set_custody_authority(ctx: Context<SetCustodyAuthority>, authority: Pubkey) -> Result<()> {
+        let c = &mut ctx.accounts.custody_config;
+        c.authority = authority;
+        c.bump = ctx.bumps.custody_config;
+        Ok(())
+    }
+
     // ------------------------- custodial holder locks -------------------------
     //
     // pump.fun's holder-reward distributor only pays token accounts whose owner
@@ -731,8 +742,6 @@ pub mod holder_locker {
         let config = &mut ctx.accounts.config;
         require!(!config.paused, LockerError::Paused);
         require!(amount > 0, LockerError::ZeroAmount);
-        require!(ctx.accounts.holder.key().is_on_curve(), LockerError::HolderNotOnCurve);
-
         let now = Clock::get()?.unix_timestamp;
         require!(unlock_ts > now, LockerError::UnlockInPast);
         require!(unlock_ts - now <= MAX_LOCK_DURATION, LockerError::LockTooLong);
@@ -824,7 +833,6 @@ pub mod holder_locker {
         let lock = &ctx.accounts.lock;
         require!(!lock.is_custodial(), LockerError::WrongLockMode);
         require!(!lock.withdrawn, LockerError::AlreadyWithdrawn);
-        require!(ctx.accounts.holder.key().is_on_curve(), LockerError::HolderNotOnCurve);
 
         let lock_key = lock.key();
         let seeds: &[&[u8]] = &[VAULT_SEED, lock_key.as_ref(), &[lock.vault_bump]];
@@ -1676,6 +1684,11 @@ pub struct CreateLockCustodial<'info> {
         bump
     )]
     pub lock: Box<Account<'info, Lock>>,
+    #[account(seeds = [CUSTODY_SEED], bump = custody_config.bump)]
+    pub custody_config: Box<Account<'info, CustodyConfig>>,
+    /// The Caged custody authority; its signature attests that  is a service-derived key.
+    #[account(constraint = custody_authority.key() == custody_config.authority @ LockerError::UnauthorizedCustody)]
+    pub custody_authority: Signer<'info>,
     /// On-curve holder key from the Caged signing service; owns the vault and must co-sign.
     #[account(mut)]
     pub holder: Signer<'info>,
@@ -1723,6 +1736,11 @@ pub struct MigrateLockToCustodial<'info> {
         associated_token::token_program = token_program,
     )]
     pub old_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(seeds = [CUSTODY_SEED], bump = custody_config.bump)]
+    pub custody_config: Box<Account<'info, CustodyConfig>>,
+    /// The Caged custody authority; attests that  is a service-derived key.
+    #[account(constraint = custody_authority.key() == custody_config.authority @ LockerError::UnauthorizedCustody)]
+    pub custody_authority: Signer<'info>,
     /// On-curve holder key from the Caged signing service; must co-sign.
     #[account(mut)]
     pub holder: Signer<'info>,
@@ -1883,6 +1901,23 @@ pub struct CloseLockCustodial<'info> {
 }
 
 #[derive(Accounts)]
+pub struct SetCustodyAuthority<'info> {
+    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin)]
+    pub config: Account<'info, Config>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(
+        init_if_needed,
+        payer = admin,
+        space = 8 + CustodyConfig::INIT_SPACE,
+        seeds = [CUSTODY_SEED],
+        bump
+    )]
+    pub custody_config: Account<'info, CustodyConfig>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct FundBoostPool<'info> {
     #[account(mut)]
     pub funder: Signer<'info>,
@@ -1935,6 +1970,14 @@ pub struct Lock {
     pub bonus_paid: u64,
     pub bump: u8,
     pub vault_bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct CustodyConfig {
+    /// Service key that must co-sign custodial lock creation and migration.
+    pub authority: Pubkey,
+    pub bump: u8,
 }
 
 #[account]
@@ -2089,8 +2132,8 @@ pub enum LockerError {
     RewardMintProgramMismatch,
     #[msg("Instruction does not match the lock's custody mode")]
     WrongLockMode,
-    #[msg("Holder key must be an on-curve address")]
-    HolderNotOnCurve,
+    #[msg("Custody authority signature missing or wrong")]
+    UnauthorizedCustody,
     #[msg("Math overflow")]
     MathOverflow,
 }

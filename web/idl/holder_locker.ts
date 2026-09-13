@@ -1590,6 +1590,32 @@ export type HolderLocker = {
           }
         },
         {
+          "name": "custodyConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "custodyAuthority",
+          "docs": [
+            "The Caged custody authority; its signature attests that  is a service-derived key."
+          ],
+          "signer": true
+        },
+        {
           "name": "holder",
           "docs": [
             "On-curve holder key from the Caged signing service; owns the vault and must co-sign."
@@ -2037,6 +2063,32 @@ export type HolderLocker = {
           }
         },
         {
+          "name": "custodyConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "custodyAuthority",
+          "docs": [
+            "The Caged custody authority; attests that  is a service-derived key."
+          ],
+          "signer": true
+        },
+        {
           "name": "holder",
           "docs": [
             "On-curve holder key from the Caged signing service; must co-sign."
@@ -2117,6 +2169,82 @@ export type HolderLocker = {
         }
       ],
       "args": []
+    },
+    {
+      "name": "setCustodyAuthority",
+      "docs": [
+        "Admin: set the custody authority, the service key that must co-sign",
+        "every custodial lock creation / migration. This is what proves a lock's",
+        "holder key really belongs to the Caged signing service."
+      ],
+      "discriminator": [
+        133,
+        13,
+        129,
+        226,
+        168,
+        144,
+        110,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "custodyConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "authority",
+          "type": "pubkey"
+        }
+      ]
     },
     {
       "name": "topUp",
@@ -3119,6 +3247,19 @@ export type HolderLocker = {
       ]
     },
     {
+      "name": "custodyConfig",
+      "discriminator": [
+        241,
+        165,
+        157,
+        31,
+        210,
+        36,
+        248,
+        113
+      ]
+    },
+    {
       "name": "lock",
       "discriminator": [
         8,
@@ -3321,8 +3462,8 @@ export type HolderLocker = {
     },
     {
       "code": 6016,
-      "name": "holderNotOnCurve",
-      "msg": "Holder key must be an on-curve address"
+      "name": "unauthorizedCustody",
+      "msg": "Custody authority signature missing or wrong"
     },
     {
       "code": 6017,
@@ -3469,6 +3610,25 @@ export type HolderLocker = {
           {
             "name": "totalRewardsPaid",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "custodyConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "docs": [
+              "Service key that must co-sign custodial lock creation and migration."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }
