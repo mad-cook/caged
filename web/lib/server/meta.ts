@@ -3,6 +3,10 @@
  * 1. Helius DAS getAssetBatch (fast, indexed).
  * 2. If DAS has no image but knows the metadata JSON URI (common for fresh
  *    pump.fun coins), fetch that JSON and read its `image`.
+ *
+ * Images hosted on IPFS are returned as same-origin /api/img proxy URLs:
+ * ipfs.io answers browsers with 403 (Cross-Origin-Resource-Policy) and the
+ * proxy retries gateways that do work (pump.fun's Pinata first).
  */
 export interface TokenMeta {
   mint: string;
@@ -22,9 +26,28 @@ const cache = new Map<string, { at: number; v: TokenMeta }>();
 const TTL = 10 * 60 * 1000;
 const JSON_TIMEOUT_MS = 5000;
 
+export function ipfsCid(u: string | null | undefined): string | null {
+  if (!u || typeof u !== "string") return null;
+  if (u.startsWith("ipfs://")) return u.slice(7).replace(/^ipfs\//, "").split(/[?#]/)[0];
+  const m = u.match(/\/ipfs\/([^/?#]+)/);
+  return m ? m[1] : null;
+}
+
+/** Gateway URL for fetching metadata JSON server-side (Pinata first; ipfs.io rate-limits). */
 export function normalizeUri(u: string | null | undefined): string | null {
   if (!u || typeof u !== "string") return null;
-  if (u.startsWith("ipfs://")) return `https://ipfs.io/ipfs/${u.slice(7).replace(/^ipfs\//, "")}`;
+  const cid = ipfsCid(u);
+  if (cid) return `https://pump.mypinata.cloud/ipfs/${cid}`;
+  if (u.startsWith("ar://")) return `https://arweave.net/${u.slice(5)}`;
+  if (/^https?:\/\//.test(u)) return u;
+  return null;
+}
+
+/** Browser-safe image URL: IPFS goes through our proxy, everything else as-is. */
+export function imageUrl(u: string | null | undefined): string | null {
+  if (!u || typeof u !== "string") return null;
+  const cid = ipfsCid(u);
+  if (cid) return `/api/img?u=${encodeURIComponent(`https://ipfs.io/ipfs/${cid}`)}`;
   if (u.startsWith("ar://")) return `https://arweave.net/${u.slice(5)}`;
   if (/^https?:\/\//.test(u)) return u;
   return null;
@@ -37,12 +60,25 @@ async function fetchJsonImage(uri: string): Promise<string | null> {
     const res = await fetch(uri, { signal: ctrl.signal, cache: "no-store", headers: { accept: "application/json" } });
     if (!res.ok) return null;
     const j = await res.json();
-    return normalizeUri(j?.image) ?? normalizeUri(j?.properties?.files?.[0]?.uri) ?? null;
+    return imageUrl(j?.image) ?? imageUrl(j?.properties?.files?.[0]?.uri) ?? null;
   } catch {
     return null;
   } finally {
     clearTimeout(t);
   }
+}
+
+/** Try the Pinata gateway, then ipfs.io, then the raw URI. */
+async function fetchJsonImageAnyGateway(jsonUri: string): Promise<string | null> {
+  const cid = ipfsCid(jsonUri);
+  const candidates = cid
+    ? [`https://pump.mypinata.cloud/ipfs/${cid}`, `https://ipfs.io/ipfs/${cid}`, `https://ipfs.filebase.io/ipfs/${cid}`]
+    : [normalizeUri(jsonUri)].filter(Boolean) as string[];
+  for (const u of candidates) {
+    const img = await fetchJsonImage(u);
+    if (img) return img;
+  }
+  return null;
 }
 
 export async function resolveTokenMeta(mints: string[]): Promise<Map<string, TokenMeta>> {
@@ -75,11 +111,10 @@ export async function resolveTokenMeta(mints: string[]): Promise<Map<string, Tok
     assets.map(async (a) => {
       if (!a?.id) return;
       let image =
-        normalizeUri(a.content?.links?.image) ??
-        normalizeUri(a.content?.files?.[0]?.cdn_uri) ??
-        normalizeUri(a.content?.files?.[0]?.uri);
-      const jsonUri = normalizeUri(a.content?.json_uri);
-      if (!image && jsonUri) image = await fetchJsonImage(jsonUri);
+        imageUrl(a.content?.links?.image) ??
+        imageUrl(a.content?.files?.[0]?.cdn_uri) ??
+        imageUrl(a.content?.files?.[0]?.uri);
+      if (!image && a.content?.json_uri) image = await fetchJsonImageAnyGateway(a.content.json_uri);
       const meta: TokenMeta = {
         mint: a.id,
         name: a.content?.metadata?.name || a.token_info?.symbol || "Unknown",
