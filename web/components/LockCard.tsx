@@ -48,6 +48,8 @@ export default function LockCard({
   const [pump, setPump] = useState<PumpStatus | null>(null);
   const [claimable, setClaimable] = useState<number>(0);
   const [tokenRewards, setTokenRewards] = useState<TokenReward[]>([]);
+  /** metadata for reward mints + the coin's quote mint, keyed by mint */
+  const [rewardMeta, setRewardMeta] = useState<Map<string, TokenMeta>>(new Map());
   const [boost, setBoost] = useState<BoostPoolAccount | null>(null);
   const [now, setNow] = useState(Date.now() / 1000);
   const [panel, setPanel] = useState<"none" | "extend" | "topup">("none");
@@ -67,11 +69,21 @@ export default function LockCard({
     setClaimable(c);
     setTokenRewards(tr);
     setBoost(b);
+    if (tr.length) {
+      const mints = tr.map((r) => r.mint.toBase58());
+      fetchTokenMeta(mints).then((m) => setRewardMeta((prev) => new Map([...prev, ...m]))).catch(() => null);
+    }
   }, [connection, program, lock]);
 
   useEffect(() => {
     fetchTokenMeta([lock.mint.toBase58()]).then((m) => setMeta(m.get(lock.mint.toBase58()) ?? null));
-    getPumpStatuses(connection, [lock.mint]).then((m) => setPump(m.get(lock.mint.toBase58()) ?? null));
+    getPumpStatuses(connection, [lock.mint]).then((m) => {
+      const p = m.get(lock.mint.toBase58()) ?? null;
+      setPump(p);
+      if (p?.quoteMint) {
+        fetchTokenMeta([p.quoteMint]).then((mm) => setRewardMeta((prev) => new Map([...prev, ...mm]))).catch(() => null);
+      }
+    });
     refresh();
     const id = setInterval(() => setNow(Date.now() / 1000), 1000);
     const id2 = setInterval(refresh, 30_000);
@@ -93,6 +105,8 @@ export default function LockCard({
     }
   }
 
+  const quoteMeta = pump?.quoteMint ? rewardMeta.get(pump.quoteMint) : undefined;
+  const quoteLabel = pump?.quoteMint ? quoteMeta?.symbol || shortAddr(pump.quoteMint) : "SOL";
   const feePct = config ? config.rewardFeeBps / 100 : 2;
   const netClaim = claimable - Math.floor((claimable * (config?.rewardFeeBps ?? 200)) / 10_000);
   const boostedShare =
@@ -141,8 +155,26 @@ export default function LockCard({
           <dd>{formatDate(lock.createdTs.toNumber())}</dd>
         </div>
         <div>
-          <dt className="text-xs text-slate-500">Claimable rewards</dt>
-          <dd className="font-mono text-acid">{lamportsToSol(claimable, 5)} SOL</dd>
+          <dt className="text-xs text-slate-500">
+            Claimable rewards
+            {pump?.isHolderReward && (
+              <span className="ml-1 text-slate-600" title={pump.quoteMint ? `This coin's holder rewards are paid in ${quoteLabel}` : "Paid in SOL"}>
+                · paid in {quoteLabel}
+              </span>
+            )}
+          </dt>
+          <dd className="font-mono text-acid">
+            {(claimable > 0 || !pump?.quoteMint) && <div>{lamportsToSol(claimable, 5)} SOL</div>}
+            {tokenRewards.map((r) => {
+              const rm = rewardMeta.get(r.mint.toBase58());
+              return (
+                <div key={r.mint.toBase58()}>
+                  {formatUnits(r.rawAmount, r.decimals, 4)} {rm?.symbol || shortAddr(r.mint.toBase58())}
+                </div>
+              );
+            })}
+            {claimable === 0 && tokenRewards.length === 0 && pump?.quoteMint && <div>0 {quoteLabel}</div>}
+          </dd>
         </div>
         <div>
           <dt className="text-xs text-slate-500">Claimed so far</dt>
@@ -179,10 +211,24 @@ export default function LockCard({
       {tokenRewards.length > 0 && (
         <div className="mt-3 rounded-xl border border-ink-700 bg-ink-950/60 p-3 text-sm">
           <div className="mb-1 text-xs text-slate-400">Token rewards sitting on this lock</div>
-          {tokenRewards.map((r) => (
-            <div key={r.account.toBase58()} className="flex items-center justify-between py-1">
-              <span className="font-mono">
-                {formatUnits(r.rawAmount, r.decimals, 4)} <span className="text-slate-400">{shortAddr(r.mint.toBase58())}</span>
+          {tokenRewards.map((r) => {
+            const rm = rewardMeta.get(r.mint.toBase58());
+            return (
+            <div key={r.account.toBase58()} className="flex items-center justify-between gap-3 py-1">
+              <span className="flex min-w-0 items-center gap-2">
+                {rm?.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={rm.image} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
+                ) : (
+                  <span className="h-6 w-6 shrink-0 rounded-full bg-ink-600" />
+                )}
+                <span className="font-mono">
+                  {formatUnits(r.rawAmount, r.decimals, 4)} <span className="font-semibold">{rm?.symbol || shortAddr(r.mint.toBase58())}</span>
+                </span>
+                <span className="truncate text-xs text-slate-400">{rm?.name}</span>
+                <a className="text-xs text-slate-500 underline" href={EXPLORER(r.mint.toBase58())} target="_blank" rel="noreferrer">
+                  {shortAddr(r.mint.toBase58())}
+                </a>
               </span>
               {!readOnly && treasury && (
                 <button
@@ -194,7 +240,8 @@ export default function LockCard({
                 </button>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

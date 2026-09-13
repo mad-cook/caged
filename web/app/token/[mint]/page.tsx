@@ -73,6 +73,11 @@ export default function TokenPage() {
                 <span className="badge bg-ink-600 text-slate-300">pump.fun</span>
               )}
               {data.pump?.graduated && <span className="badge bg-ink-600 text-slate-300">graduated</span>}
+              {data.pump?.isHolderReward && (
+                <span className="badge bg-ink-600 text-slate-300" title="Asset pump.fun pays holder rewards in">
+                  rewards paid in {data.rewardAsset ? data.rewardAsset.symbol || shortAddr(data.rewardAsset.mint) : "SOL"}
+                </span>
+              )}
             </div>
           </div>
         </div>

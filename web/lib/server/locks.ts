@@ -58,6 +58,8 @@ export interface TokenLocksJson {
   decimals: number;
   supplyRaw: string | null;
   pump: PumpStatus | null;
+  /** asset holder rewards are paid in; null = SOL */
+  rewardAsset: { mint: string; symbol: string | null; name: string | null; image: string | null } | null;
   totalLockedRaw: string;
   totalLocked: string;
   percentOfSupply: number | null;
@@ -198,6 +200,13 @@ export async function buildTokenLocks(mint: PublicKey): Promise<TokenLocksJson> 
     }
   }
 
+  const pump = pumpMap.get(mint.toBase58()) ?? null;
+  let rewardAsset: TokenLocksJson["rewardAsset"] = null;
+  if (pump?.quoteMint) {
+    const q = await fetchMeta(pump.quoteMint);
+    rewardAsset = { mint: pump.quoteMint, symbol: q.symbol, name: q.name, image: q.image };
+  }
+
   return {
     mint: mint.toBase58(),
     name: meta.name,
@@ -205,7 +214,8 @@ export async function buildTokenLocks(mint: PublicKey): Promise<TokenLocksJson> 
     image: meta.image,
     decimals,
     supplyRaw: supplyRaw?.toString() ?? null,
-    pump: pumpMap.get(mint.toBase58()) ?? null,
+    pump,
+    rewardAsset,
     totalLockedRaw: total.toString(),
     totalLocked: formatUnits(total, decimals, 2),
     percentOfSupply: pct,
