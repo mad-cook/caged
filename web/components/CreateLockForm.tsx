@@ -222,19 +222,28 @@ export default function CreateLockForm() {
           </div>
         )}
 
-        <div className="rounded-xl border border-ink-600 bg-ink-800/60 p-3 text-xs">
-          <label className="flex cursor-pointer items-start gap-3">
-            <input type="checkbox" className="mt-0.5 h-4 w-4 accent-acid" checked={custodial} onChange={(e) => setCustodial(e.target.checked)} />
-            <span>
-              <span className="font-semibold text-slate-100">Keep earning holder rewards (Caged custody)</span>
-              <span className="mt-1 block text-slate-400">
-                pump.fun only pays rewards to ordinary wallet addresses, never to program vaults. With this on, your lock&apos;s
-                holder address is a real key held by Caged&apos;s signing service, so distributions reach it. The unlock date, owner
-                and fees are still enforced by the on-chain program, but you are trusting Caged not to move locked tokens early.
-                Turn it off for a fully trustless lock that earns no holder rewards.
-              </span>
-            </span>
-          </label>
+        <div className={}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-semibold text-slate-100">
+              Holder rewards: <span className={custodial ? "text-acid" : "text-ember"}>{custodial ? "ON · Caged custody" : "OFF · trustless"}</span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={custodial}
+              onClick={() => setCustodial((v) => !v)}
+              className={}
+              title={custodial ? "Switch to a trustless lock (no holder rewards)" : "Switch to Caged custody (earns holder rewards)"}
+            >
+              <span className={} />
+              <span className={}>{custodial ? "ON" : "OFF"}</span>
+            </button>
+          </div>
+          <p className="mt-2 text-slate-400">
+            {custodial
+              ? "pump.fun only pays rewards to ordinary wallet addresses, never to program vaults. Your lock's holder address will be a real key held by Caged's signing service, so distributions reach it. The unlock date, owner and fees are enforced by the on-chain program, but you are trusting Caged not to move locked tokens early."
+              : "Fully trustless: the vault is owned by a program address nobody controls. pump.fun does not pay holder rewards to program addresses, so this lock earns nothing. You can migrate it into Caged custody later."}
+          </p>
         </div>
 
         <div className="fee-summary">
