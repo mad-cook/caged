@@ -34,6 +34,24 @@ client passes the hook program, its extra-account-meta list and the extra accoun
 (`web/lib/hooks.ts` resolves them with `addExtraAccountMetasForExecute`). Mints whose hook extension has
 no program set, which is the case for PUMP and the tokenized stocks today, need nothing extra.
 
+## Custodial locks
+
+Verified on mainnet (2026-09-13): pump.fun's `distribute_fee_to_holders` pays only on-curve owners; a
+fresh never-traded wallet was paid while the PDA-owned lock vault holding 25% of supply was not. Hence:
+
+* `create_lock_custodial` / `migrate_lock_to_custodial` / `withdraw_custodial` /
+  `claim_sol_rewards_custodial` / `claim_token_rewards_custodial` / `close_lock_custodial` use a real
+  keypair (`holder`) as vault owner. It must co-sign, which also proves it belongs to the signing service
+  (nobody can create a "Caged custody" lock with a key they control). Custodial locks are marked by
+  `vault_bump == 0`.
+* Holder keys are derived, not stored: `HMAC-SHA512(LOCK_MASTER_SECRET, "caged-holder-v1" || lock)[..32]`
+  → ed25519 seed (`web/lib/server/custody.ts`). `POST /api/custody/holder` returns the address;
+  `POST /api/custody/sign` co-signs, refusing anything that is not one of the instructions above for our
+  program with the lock present and the holder as a non-fee-payer signer.
+* `LOCK_MASTER_SECRET`: set once, back it up offline, never rotate (rotation orphans every custodial
+  lock). Leaking it makes every custodial lock drainable by anyone; the program still limits *what* a
+  transaction can do, but a raw token transfer signed by the holder bypasses the program entirely.
+
 ## Toolchain
 
 * Anchor 0.30.1, Solana CLI 1.18.x (platform-tools Rust 1.75). The lockfile is pinned accordingly;

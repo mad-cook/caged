@@ -46,6 +46,8 @@ export interface LockJson {
   bonusBps: number;
   solRewardsClaimedLamports: string;
   bonusPaidLamports: string;
+  /** true = holder key held by Caged (eligible for pump.fun holder rewards); false = trustless PDA vault */
+  custodial: boolean;
 }
 
 export interface TokenLocksJson {
@@ -103,6 +105,7 @@ function decodeLock(pubkey: PublicKey, data: Buffer): LockJson & { decimalsHint?
     bonusBps: l.bonus_bps,
     solRewardsClaimedLamports: l.sol_rewards_claimed.toString(),
     bonusPaidLamports: l.bonus_paid.toString(),
+    custodial: l.vault_bump === 0,
   };
 }
 

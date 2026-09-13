@@ -16,11 +16,17 @@ import {
   ConfigAccount,
   LockAccount,
   TokenReward,
+  claimSolRewardsCustodialIx,
   claimSolRewardsIx,
+  claimTokenRewardsCustodialIx,
   claimTokenRewardsIx,
+  closeLockCustodialIx,
   closeLockIx,
   extendLockIx,
   fetchBoostPool,
+  isCustodial,
+  migrateLockIx,
+  withdrawCustodialIx,
   fetchClaimableSol,
   fetchTokenRewards,
   topUpIx,
@@ -107,9 +113,12 @@ export default function LockCard({
     return (net * BigInt(lock.bonusBps) * BigInt(lock.boostedAmount.toString())) / (10_000n * BigInt(lock.amount.toString()));
   };
 
-  async function run(build: () => Promise<any>) {
-    const ix = await build();
-    const sig = await send([ix]);
+  const custodial = isCustodial(lock);
+  /** custodial locks need the holder key's co-signature on value-moving instructions */
+  async function run(build: () => Promise<any>, coSign = custodial) {
+    const built = await build();
+    const ix = built && built.ix ? built.ix : built;
+    const sig = await send([ix], coSign ? lock.publicKey : undefined);
     if (sig) {
       await refresh();
       onChanged?.();
@@ -140,6 +149,11 @@ export default function LockCard({
                 <span className="badge bg-sol/15 text-sol">◇ +{lock.bonusBps / 100}% boost</span>
               )}
               {lock.withdrawn && <span className="badge bg-ink-600 text-slate-300">withdrawn</span>}
+              {custodial ? (
+                <span className="badge bg-acid/15 text-acid" title="Holder key held by Caged's signing service; pump.fun pays this lock">earning · Caged custody</span>
+              ) : (
+                <span className="badge bg-ink-700 text-slate-400" title="Vault owned by a program address; pump.fun does not pay program addresses">trustless · no holder rewards</span>
+              )}
             </div>
             <div className="text-xs text-slate-400">{meta?.name}</div>
             <div className="mt-1.5">
@@ -246,7 +260,7 @@ export default function LockCard({
                 <button
                   className="btn-ghost !px-3 !py-1 text-xs"
                   disabled={busy}
-                  onClick={() => run(() => claimTokenRewardsIx(program, lock, treasury, r, boost))}
+                  onClick={() => run(() => custodial ? claimTokenRewardsCustodialIx(program, lock, treasury, r, boost) : claimTokenRewardsIx(program, lock, treasury, r, boost))}
                   title={tokenBonusEstimate(r) > 0n ? `+ ~${formatUnits(tokenBonusEstimate(r), r.decimals, 4)} boost bonus from the pool` : undefined}
                 >
                   Claim
@@ -265,7 +279,7 @@ export default function LockCard({
             <button
               className="btn-primary"
               disabled={busy || claimable <= 0 || !treasury}
-              onClick={() => run(() => claimSolRewardsIx(program, lock, treasury!, solPoolPk))}
+              onClick={() => run(() => custodial ? claimSolRewardsCustodialIx(program, lock, treasury!, solPoolPk) : claimSolRewardsIx(program, lock, treasury!, solPoolPk))}
               title={`You receive ${lamportsToSol(netClaim, 5)} SOL after the ${feePct}% fee${
                 estBonus > 0 ? ` + ~${lamportsToSol(estBonus, 5)} SOL boost bonus` : ""
               }`}
@@ -278,7 +292,7 @@ export default function LockCard({
                 <button
                   className="btn-ghost"
                   disabled={busy || !unlocked}
-                  onClick={() => run(() => withdrawIx(program, lock, boostPk))}
+                  onClick={() => run(() => custodial ? withdrawCustodialIx(program, lock, boostPk) : withdrawIx(program, lock, boostPk))}
                   title={unlocked ? "Return locked tokens to your wallet" : "Not unlocked yet"}
                 >
                   Withdraw
@@ -289,10 +303,23 @@ export default function LockCard({
                 <button className="btn-ghost" disabled={busy} onClick={() => setPanel(panel === "topup" ? "none" : "topup")}>
                   Top up
                 </button>
+                {!custodial && treasury && (
+                  <button
+                    className="btn-primary"
+                    disabled={busy}
+                    title="Move this lock into Caged custody so pump.fun pays it. Same owner, amount and unlock date."
+                    onClick={() => {
+                      if (!confirm("Migrate this lock into Caged custody? The unlock date, amount and owner stay the same. The holder key will be held by Caged's signing service so pump.fun pays holder rewards to the lock.")) return;
+                      run(() => migrateLockIx(program, lock, treasury), true);
+                    }}
+                  >
+                    Migrate → earn rewards
+                  </button>
+                )}
               </>
             )}
             {lock.withdrawn && treasury && (
-              <button className="btn-danger" disabled={busy} onClick={() => run(() => closeLockIx(program, lock, treasury))}>
+              <button className="btn-danger" disabled={busy} onClick={() => run(() => custodial ? closeLockCustodialIx(program, lock, treasury) : closeLockIx(program, lock, treasury))}>
                 Close &amp; reclaim rent
               </button>
             )}
@@ -316,7 +343,7 @@ export default function LockCard({
                 onClick={() => {
                   const ts = Math.floor(new Date(extendLocal).getTime() / 1000);
                   if (!(ts > unlockTs)) return;
-                  run(() => extendLockIx(program, lock, ts)).then(() => setPanel("none"));
+                  run(() => extendLockIx(program, lock, ts), false).then(() => setPanel("none"));
                 }}
               >
                 Confirm extend
@@ -346,7 +373,7 @@ export default function LockCard({
                     return;
                   }
                   if (raw <= 0n) return;
-                  run(() => topUpIx(program, lock, new BN(raw.toString()), boostPk)).then(() => {
+                  run(() => topUpIx(program, lock, new BN(raw.toString()), boostPk), false).then(() => {
                     setPanel("none");
                     setTopUpAmount("");
                   });

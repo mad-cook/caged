@@ -386,3 +386,172 @@ export function explainError(e: unknown): string {
   if (/TokenAccountNotFound|could not find account/i.test(msg)) return "Token account not found";
   return msg.length > 200 ? msg.slice(0, 200) + "…" : msg;
 }
+
+// ------------------------------------------------ custodial locks ----
+
+/** Custodial locks are marked on-chain by vault_bump == 0 (holder is an on-curve key). */
+export function isCustodial(l: LockAccount): boolean {
+  return l.vaultBump === 0;
+}
+
+/** Ask the server for the holder key of a lock (deterministic, public info). */
+export async function fetchHolder(lock: PublicKey): Promise<PublicKey> {
+  const res = await fetch("/api/custody/holder", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ lock: lock.toBase58() }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "custody unavailable");
+  return new PublicKey((await res.json()).holder);
+}
+
+export async function createLockCustodialIx(program: Program<HolderLocker>, p: CreateLockParams) {
+  const lockId = p.lockId ?? new BN(Date.now());
+  const lock = lockPda(p.owner, lockId);
+  const holder = await fetchHolder(lock);
+  const ownerAta = ata(p.owner, p.mint, p.tokenProgram);
+  const vault = ata(holder, p.mint, p.tokenProgram);
+  const hooks = await hookRemainingAccounts(program.provider.connection, p.mint, p.tokenProgram, [
+    { source: ownerAta, destination: vault, owner: p.owner, amount: BigInt(p.amount.toString()) },
+  ]);
+  const ix = await program.methods
+    .createLockCustodial(lockId, p.amount, new BN(p.unlockTs))
+    .accountsPartial({
+      config: configPda(),
+      treasury: p.treasury,
+      owner: p.owner,
+      mint: p.mint,
+      ownerTokenAccount: ownerAta,
+      lock,
+      holder,
+      vault,
+      boostPool: p.boostPool ?? null,
+      tokenProgram: p.tokenProgram,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    })
+    .remainingAccounts(hooks)
+    .instruction();
+  return { ix, lock, lockId, holder };
+}
+
+export async function migrateLockIx(program: Program<HolderLocker>, l: LockAccount, treasury: PublicKey) {
+  const holder = await fetchHolder(l.publicKey);
+  const oldVault = ata(l.vaultAuthority, l.mint, l.tokenProgram);
+  const newVault = ata(holder, l.mint, l.tokenProgram);
+  const hooks = await hookRemainingAccounts(program.provider.connection, l.mint, l.tokenProgram, [
+    { source: oldVault, destination: newVault, owner: l.vaultAuthority, amount: BigInt(l.amount.toString()) },
+  ]);
+  const ix = await program.methods
+    .migrateLockToCustodial()
+    .accountsPartial({
+      config: configPda(),
+      treasury,
+      owner: l.owner,
+      lock: l.publicKey,
+      mint: l.mint,
+      oldVaultAuthority: l.vaultAuthority,
+      oldVault,
+      holder,
+      newVault,
+      tokenProgram: l.tokenProgram,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    })
+    .remainingAccounts(hooks)
+    .instruction();
+  return { ix, holder };
+}
+
+export async function withdrawCustodialIx(program: Program<HolderLocker>, l: LockAccount, boostPool?: PublicKey | null) {
+  const ownerAta = ata(l.owner, l.mint, l.tokenProgram);
+  const vault = ata(l.vaultAuthority, l.mint, l.tokenProgram);
+  const hooks = await hookRemainingAccounts(program.provider.connection, l.mint, l.tokenProgram, [
+    { source: vault, destination: ownerAta, owner: l.vaultAuthority, amount: BigInt(l.amount.toString()) },
+  ]);
+  return program.methods
+    .withdrawCustodial()
+    .accountsPartial({
+      owner: l.owner,
+      lock: l.publicKey,
+      mint: l.mint,
+      ownerTokenAccount: ownerAta,
+      holder: l.vaultAuthority,
+      vault,
+      boostPool: boostPool ?? null,
+      tokenProgram: l.tokenProgram,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    })
+    .remainingAccounts(hooks)
+    .instruction();
+}
+
+export async function claimSolRewardsCustodialIx(program: Program<HolderLocker>, l: LockAccount, treasury: PublicKey, boostPool?: PublicKey | null) {
+  return program.methods
+    .claimSolRewardsCustodial()
+    .accountsPartial({
+      config: configPda(),
+      treasury,
+      owner: l.owner,
+      lock: l.publicKey,
+      holder: l.vaultAuthority,
+      boostPool: boostPool ?? null,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction();
+}
+
+export async function claimTokenRewardsCustodialIx(
+  program: Program<HolderLocker>,
+  l: LockAccount,
+  treasury: PublicKey,
+  reward: TokenReward,
+  boostPool?: BoostPoolAccount | null,
+) {
+  const rewardVault = ata(l.vaultAuthority, reward.mint, reward.tokenProgram);
+  const ownerAta = ata(l.owner, reward.mint, reward.tokenProgram);
+  const treasuryAta = ata(treasury, reward.mint, reward.tokenProgram);
+  const usePool = !!boostPool && boostPool.rewardMint.equals(reward.mint);
+  const poolAta = usePool ? ata(boostPool!.publicKey, reward.mint, reward.tokenProgram) : null;
+  const legs = [
+    { source: rewardVault, destination: treasuryAta, owner: l.vaultAuthority, amount: reward.rawAmount / 50n },
+    { source: rewardVault, destination: ownerAta, owner: l.vaultAuthority, amount: reward.rawAmount },
+  ];
+  if (usePool && poolAta) legs.push({ source: poolAta, destination: ownerAta, owner: boostPool!.publicKey, amount: reward.rawAmount });
+  const hooks = await hookRemainingAccounts(program.provider.connection, reward.mint, reward.tokenProgram, legs);
+  return program.methods
+    .claimTokenRewardsCustodial()
+    .accountsPartial({
+      config: configPda(),
+      treasury,
+      owner: l.owner,
+      lock: l.publicKey,
+      holder: l.vaultAuthority,
+      rewardMint: reward.mint,
+      rewardVault,
+      ownerTokenAccount: ownerAta,
+      treasuryTokenAccount: treasuryAta,
+      boostPool: usePool ? boostPool!.publicKey : null,
+      boostPoolTokenAccount: poolAta,
+      rewardTokenProgram: reward.tokenProgram,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    })
+    .remainingAccounts(hooks)
+    .instruction();
+}
+
+export async function closeLockCustodialIx(program: Program<HolderLocker>, l: LockAccount, treasury: PublicKey) {
+  return program.methods
+    .closeLockCustodial()
+    .accountsPartial({
+      config: configPda(),
+      treasury,
+      owner: l.owner,
+      lock: l.publicKey,
+      holder: l.vaultAuthority,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction();
+}

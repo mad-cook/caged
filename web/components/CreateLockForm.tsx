@@ -14,7 +14,7 @@ import { useSendTx } from "@/hooks/useSendTx";
 import { WalletToken, fetchTokenMeta } from "@/lib/tokens";
 import { QuoteAssetInfo, inspectQuoteAsset } from "@/lib/hooks";
 import { useConnection } from "@solana/wallet-adapter-react";
-import { BoostPoolAccount, ConfigAccount, createLockIx, fetchBoostPool, fetchConfig } from "@/lib/program";
+import { BoostPoolAccount, ConfigAccount, createLockCustodialIx, createLockIx, fetchBoostPool, fetchConfig } from "@/lib/program";
 import { formatUnits, formatUnitsPlain, lamportsToSol, parseUnits, toDatetimeLocal, durationLabel } from "@/lib/format";
 import { EXPLORER } from "@/lib/constants";
 
@@ -44,6 +44,8 @@ export default function CreateLockForm() {
   const [quoteSymbol, setQuoteSymbol] = useState<string>("");
   const { connection } = useConnection();
   const [created, setCreated] = useState<{ lock: string; sig: string } | null>(null);
+  /** custody mode: holder key held by Caged so pump.fun pays the lock; false = trustless PDA, no rewards */
+  const [custodial, setCustodial] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -100,7 +102,7 @@ export default function CreateLockForm() {
   async function submit() {
     if (!publicKey || !token || !rawAmount || !config) return;
     setCreated(null);
-    const { ix, lock } = await createLockIx(program, {
+    const params = {
       owner: publicKey,
       mint: new PublicKey(token.mint),
       tokenProgram: new PublicKey(token.tokenProgram),
@@ -108,8 +110,9 @@ export default function CreateLockForm() {
       unlockTs,
       treasury: config.treasury,
       boostPool: boost ? boost.publicKey : null,
-    });
-    const sig = await send([ix]);
+    };
+    const { ix, lock } = custodial ? await createLockCustodialIx(program, params) : await createLockIx(program, params);
+    const sig = await send([ix], custodial ? lock : undefined);
     if (sig) {
       setCreated({ lock: lock.toBase58(), sig });
       setAmount("");
@@ -218,6 +221,21 @@ export default function CreateLockForm() {
             ) : null}
           </div>
         )}
+
+        <div className="rounded-xl border border-ink-600 bg-ink-800/60 p-3 text-xs">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input type="checkbox" className="mt-0.5 h-4 w-4 accent-acid" checked={custodial} onChange={(e) => setCustodial(e.target.checked)} />
+            <span>
+              <span className="font-semibold text-slate-100">Keep earning holder rewards (Caged custody)</span>
+              <span className="mt-1 block text-slate-400">
+                pump.fun only pays rewards to ordinary wallet addresses, never to program vaults. With this on, your lock&apos;s
+                holder address is a real key held by Caged&apos;s signing service, so distributions reach it. The unlock date, owner
+                and fees are still enforced by the on-chain program, but you are trusting Caged not to move locked tokens early.
+                Turn it off for a fully trustless lock that earns no holder rewards.
+              </span>
+            </span>
+          </label>
+        </div>
 
         <div className="fee-summary">
           <div className="flex justify-between">

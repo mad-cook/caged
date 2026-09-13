@@ -19,6 +19,17 @@ import {
   mintTo,
 } from "@solana/spl-token";
 import { assert } from "chai";
+import { createHmac } from "crypto";
+const TEST_MASTER = "test-master-secret-do-not-use-in-prod-0123456789";
+/** same derivation as web/lib/server/custody.ts */
+function deriveHolder(lock: PublicKey): Keypair {
+  const seed = createHmac("sha512", Buffer.from(TEST_MASTER, "utf8"))
+    .update(Buffer.from("caged-holder-v1"))
+    .update(lock.toBuffer())
+    .digest()
+    .subarray(0, 32);
+  return Keypair.fromSeed(seed);
+}
 import { HolderLocker } from "../target/types/holder_locker";
 
 let RESERVE = 890_880; // rent-exempt minimum for a 0-byte account; refreshed from the cluster in before()
@@ -462,6 +473,166 @@ describe("holder_locker", () => {
       .rpc();
     const v = await getAccount(conn, ata(va, mint22, TOKEN_2022_PROGRAM_ID), "confirmed", TOKEN_2022_PROGRAM_ID);
     assert.equal(v.amount.toString(), (100 * 10 ** decimals).toString());
+  });
+
+  describe("custodial locks (on-curve holder key)", () => {
+    const cid = new BN(501);
+    let clock: PublicKey;
+    let holder: Keypair;
+
+    it("creates a custodial lock; holder is an on-curve system account owning the vault", async () => {
+      clock = lockPda(user.publicKey, cid);
+      holder = deriveHolder(clock);
+      assert.isTrue(PublicKey.isOnCurve(holder.publicKey.toBytes()));
+      await program.methods
+        .createLockCustodial(cid, new BN(1_000 * 10 ** decimals), new BN((await chainNow()) + 30))
+        .accountsPartial({
+          config: configPda, treasury: treasury.publicKey, owner: user.publicKey, mint, ownerTokenAccount: userAta,
+          lock: clock, holder: holder.publicKey, vault: ata(holder.publicKey, mint), boostPool: null,
+          tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+        })
+        .signers([user, holder])
+        .rpc();
+      const l = await program.account.lock.fetch(clock);
+      assert.equal(l.vaultBump, 0);
+      assert.ok(l.vaultAuthority.equals(holder.publicKey));
+      const info = await conn.getAccountInfo(holder.publicKey);
+      assert.ok(info!.owner.equals(SystemProgram.programId));
+      assert.equal(info!.lamports, RESERVE);
+      assert.equal((await getAccount(conn, ata(holder.publicKey, mint))).amount.toString(), (1_000 * 10 ** decimals).toString());
+    });
+
+    it("refuses a custodial lock whose holder does not sign", async () => {
+      const id = new BN(502);
+      const l = lockPda(user.publicKey, id);
+      const h = deriveHolder(l);
+      try {
+        await program.methods
+          .createLockCustodial(id, new BN(1), new BN((await chainNow()) + 30))
+          .accountsPartial({
+            config: configPda, treasury: treasury.publicKey, owner: user.publicKey, mint, ownerTokenAccount: userAta,
+            lock: l, holder: h.publicKey, vault: ata(h.publicKey, mint), boostPool: null,
+            tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+          })
+          .signers([user])
+          .rpc();
+        assert.fail("should fail");
+      } catch (e: any) {
+        assert.match(e.toString(), /Signature verification failed|Missing signature|unknown signer|signature/i);
+      }
+    });
+
+    it("PDA-mode instructions reject a custodial lock", async () => {
+      try {
+        await program.methods
+          .claimSolRewards()
+          .accountsPartial({
+            config: configPda, treasury: treasury.publicKey, owner: user.publicKey, lock: clock,
+            vaultAuthority: vaultAuthPda(clock), boostPool: null, systemProgram: SystemProgram.programId,
+          })
+          .signers([user])
+          .rpc();
+        assert.fail("should fail");
+      } catch (e: any) {
+        assert.match(e.toString(), /WrongLockMode|ConstraintSeeds|seeds constraint/i);
+      }
+    });
+
+    it("claims SOL rewards that landed on the holder (holder co-signs)", async () => {
+      const reward = 0.1 * LAMPORTS_PER_SOL;
+      await provider.sendAndConfirm(
+        new Transaction().add(SystemProgram.transfer({ fromPubkey: admin.publicKey, toPubkey: holder.publicKey, lamports: reward })),
+      );
+      const before = await conn.getBalance(user.publicKey);
+      const tBefore = await conn.getBalance(treasury.publicKey);
+      await program.methods
+        .claimSolRewardsCustodial()
+        .accountsPartial({
+          config: configPda, treasury: treasury.publicKey, owner: user.publicKey, lock: clock, holder: holder.publicKey,
+          boostPool: null, systemProgram: SystemProgram.programId,
+        })
+        .signers([user, holder])
+        .rpc();
+      assert.equal((await conn.getBalance(treasury.publicKey)) - tBefore, reward * 0.02);
+      assert.approximately((await conn.getBalance(user.publicKey)) - before, reward * 0.98, 20_000);
+      assert.equal(await conn.getBalance(holder.publicKey), RESERVE);
+    });
+
+    it("withdraws after unlock with the holder co-signing, then closes", async () => {
+      const target = (await program.account.lock.fetch(clock)).unlockTs.toNumber() + 3;
+      for (let i = 0; i < 90; i++) {
+        if ((await chainNow()) >= target) break;
+        await sleep(2000);
+      }
+      const before = (await getAccount(conn, userAta)).amount;
+      await program.methods
+        .withdrawCustodial()
+        .accountsPartial({
+          owner: user.publicKey, lock: clock, mint, ownerTokenAccount: userAta, holder: holder.publicKey,
+          vault: ata(holder.publicKey, mint), boostPool: null,
+          tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+        })
+        .signers([user, holder])
+        .rpc();
+      assert.equal(((await getAccount(conn, userAta)).amount - before).toString(), (1_000 * 10 ** decimals).toString());
+      assert.isNull(await conn.getAccountInfo(ata(holder.publicKey, mint)));
+      await program.methods
+        .closeLockCustodial()
+        .accountsPartial({
+          config: configPda, treasury: treasury.publicKey, owner: user.publicKey, lock: clock, holder: holder.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([user, holder])
+        .rpc();
+      assert.isNull(await program.account.lock.fetchNullable(clock));
+      assert.equal(await conn.getBalance(holder.publicKey), 0);
+    });
+
+    it("migrates a trustless PDA lock into custody with identical terms", async () => {
+      const id = new BN(503);
+      const l = lockPda(user.publicKey, id);
+      const va = vaultAuthPda(l);
+      const unlock = (await chainNow()) + 3600;
+      await program.methods
+        .createLock(id, new BN(200 * 10 ** decimals), new BN(unlock))
+        .accountsPartial({
+          config: configPda, treasury: treasury.publicKey, owner: user.publicKey, mint, ownerTokenAccount: userAta,
+          lock: l, vaultAuthority: va, vault: ata(va, mint), boostPool: null,
+          tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+        })
+        .signers([user])
+        .rpc();
+      // a late reward sits on the old PDA
+      await provider.sendAndConfirm(
+        new Transaction().add(SystemProgram.transfer({ fromPubkey: admin.publicKey, toPubkey: va, lamports: 0.05 * LAMPORTS_PER_SOL })),
+      );
+      const h = deriveHolder(l);
+      const before = await conn.getBalance(user.publicKey);
+      const migrateAccounts = {
+        config: configPda, treasury: treasury.publicKey, owner: user.publicKey, lock: l, mint,
+        oldVaultAuthority: va, oldVault: ata(va, mint), holder: h.publicKey, newVault: ata(h.publicKey, mint),
+        tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+      };
+      await program.methods.migrateLockToCustodial().accountsPartial(migrateAccounts).signers([user, h]).rpc();
+      const lk = await program.account.lock.fetch(l);
+      assert.equal(lk.vaultBump, 0);
+      assert.ok(lk.vaultAuthority.equals(h.publicKey));
+      assert.equal(lk.unlockTs.toNumber(), unlock);
+      assert.equal(lk.amount.toString(), (200 * 10 ** decimals).toString());
+      assert.equal((await getAccount(conn, ata(h.publicKey, mint))).amount.toString(), (200 * 10 ** decimals).toString());
+      assert.isNull(await conn.getAccountInfo(ata(va, mint)));
+      assert.equal(await conn.getBalance(va), 0);
+      assert.equal(await conn.getBalance(h.publicKey), RESERVE);
+      // owner got the old PDA reward (net) + reserve + old vault rent, minus new reserve + new ATA rent + fees
+      assert.isAbove((await conn.getBalance(user.publicKey)) - before, 0.05 * 0.98 * LAMPORTS_PER_SOL - 3_000_000);
+      // cannot migrate twice
+      try {
+        await program.methods.migrateLockToCustodial().accountsPartial(migrateAccounts).signers([user, h]).rpc();
+        assert.fail("should fail");
+      } catch (e: any) {
+        assert.match(e.toString(), /WrongLockMode|ConstraintSeeds|AccountNotInitialized|seeds constraint/i);
+      }
+    });
   });
 
   describe("boost pool", () => {

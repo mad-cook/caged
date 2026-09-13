@@ -23,18 +23,33 @@ tokens, so the vault gets the rewards, and they are gone.
 
 ## What Caged does
 
-Every lock on Caged gets **its own holder address**: a program-derived account that looks and behaves
-exactly like a wallet and owns the vault token account. Pump.fun pays that address like any other
-holder. The lock owner sweeps the rewards to their wallet whenever they like, while the tokens stay
-locked until the unlock time they chose.
+Every lock on Caged gets **its own holder address** that owns the vault token account. Pump.fun pays
+that address like any other holder. The lock owner sweeps the rewards to their wallet whenever they
+like, while the tokens stay locked until the unlock time they chose.
 
 * **Your unlock date.** Pick a date and time. Extend any time. Never shorten.
 * **Claim while locked.** SOL rewards (and token-quoted rewards such as XMR or stable-quoted coins)
   accumulate on the lock and are claimable at any moment.
 * **Public proof.** Every lock has a shareable page anyone can verify on-chain. Every token has a page
   showing how much of its supply is locked and by whom.
-* **No admin override.** Nothing can release locked tokens early.
 * Works with classic SPL and Token-2022 mints.
+
+## Two custody modes, one honest trade-off
+
+Pump.fun's distributor only pays token accounts owned by an **ordinary on-curve address**. Program-derived
+addresses are excluded (that is how pools and vaults are kept out), so a fully trustless vault can never be
+paid. Caged therefore offers both:
+
+| | Caged custody (default) | Trustless |
+| --- | --- | --- |
+| Holder address | a real keypair held by Caged's signing service | a program-derived address |
+| Pump.fun holder rewards | paid to the lock | **not paid** |
+| Who enforces owner, amount, unlock date, fees | the on-chain program | the on-chain program |
+| Can Caged move locked tokens early | technically yes, with the holder key | no, nobody can |
+
+In custody mode the program still checks every instruction, and the signing service only co-signs
+transactions made of this program's instructions, but you are trusting Caged with the key. Trustless
+locks can be migrated into custody by their owner at any time (same owner, amount and unlock date).
 
 ## Fees
 
