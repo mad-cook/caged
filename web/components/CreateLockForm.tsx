@@ -222,7 +222,7 @@ export default function CreateLockForm() {
           </div>
         )}
 
-        <div className={}>
+        <div className={`rounded-xl border p-3 text-xs transition-colors ${custodial ? "border-acid/60 bg-acid/10" : "border-ink-600 bg-ink-800/60"}`}>
           <div className="flex items-center justify-between gap-3">
             <div className="font-semibold text-slate-100">
               Holder rewards: <span className={custodial ? "text-acid" : "text-ember"}>{custodial ? "ON · Caged custody" : "OFF · trustless"}</span>
@@ -232,11 +232,11 @@ export default function CreateLockForm() {
               role="switch"
               aria-checked={custodial}
               onClick={() => setCustodial((v) => !v)}
-              className={}
+              className={`relative h-7 w-14 shrink-0 rounded-full border transition-colors ${custodial ? "border-acid bg-acid" : "border-ink-500 bg-ink-700"}`}
               title={custodial ? "Switch to a trustless lock (no holder rewards)" : "Switch to Caged custody (earns holder rewards)"}
             >
-              <span className={} />
-              <span className={}>{custodial ? "ON" : "OFF"}</span>
+              <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-ink-950 shadow transition-all ${custodial ? "left-7" : "left-0.5"}`} />
+              <span className={`absolute inset-0 flex items-center text-[9px] font-bold ${custodial ? "justify-start pl-2 text-ink-950" : "justify-end pr-2 text-slate-300"}`}>{custodial ? "ON" : "OFF"}</span>
             </button>
           </div>
           <p className="mt-2 text-slate-400">
