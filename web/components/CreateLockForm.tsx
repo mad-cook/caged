@@ -253,7 +253,7 @@ export default function CreateLockForm() {
           </div>
           <p className="mt-2 text-slate-400">
             {custodial
-              ? "pump.fun only pays rewards to ordinary wallet addresses, never to program vaults. Your lock's holder address will be a real key held by Caged's signing service, so distributions reach it. The unlock date, owner and fees are enforced by the on-chain program, but you are trusting Caged not to move locked tokens early."
+              ? "pump.fun and stonk.fun only pay rewards to ordinary wallet addresses, never to program vaults. Your lock's holder address will be a real key held by Caged's signing service, so distributions reach it. The unlock date, owner and fees are enforced by the on-chain program, but you are trusting Caged not to move locked tokens early."
               : "Fully trustless: the vault is owned by a program address nobody controls. pump.fun does not pay holder rewards to program addresses, so this lock earns nothing. You can migrate it into Caged custody later."}
           </p>
         </div>
