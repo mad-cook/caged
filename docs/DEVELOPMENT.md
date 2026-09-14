@@ -105,6 +105,23 @@ MINT=<mint> ACTION=update ACTIVE=false npm run boost
 MINT=<mint> ACTION=show npm run boost
 ```
 
+## Verified build
+
+The program is built reproducibly in CI (`.github/workflows/verify.yml`): `solana-verify build` inside the
+`solanafoundation/solana-verifiable-build:1.18.26` image, the executable hash is compared with mainnet and the
+`.so` + `hashes.txt` are attached to a release tagged `verifiable-<sha>`. Only that binary should be deployed
+to mainnet, otherwise the on-chain hash will not match the source.
+
+To (re)register the build with the OtterSec verification registry after a deploy (the `solana-verify` CLI does
+not compile on Windows, so this is a Node port of `verify-from-repo --remote`):
+
+```
+ANCHOR_PROVIDER_URL=<mainnet rpc> ANCHOR_WALLET=<upgrade authority keypair>   npx ts-node scripts/verify-pda.ts --commit <sha of the deployed build> --simulate   # dry run
+  npx ts-node scripts/verify-pda.ts --commit <sha> --submit                           # write PDA + remote job
+```
+
+Status page: https://verify.osec.io/status/65cX8gGch8x4vQvU4gnpPcepwKadDSAtJ4ZgZg3hp61t
+
 ## Web app
 
 ```bash

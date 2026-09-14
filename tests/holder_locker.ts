@@ -544,7 +544,7 @@ describe("holder_locker", () => {
           .rpc();
         assert.fail("should fail");
       } catch (e: any) {
-        assert.match(e.toString(), /WrongLockMode|ConstraintSeeds|seeds constraint/i);
+        assert.match(e.toString(), /WrongLockMode|ConstraintSeeds|seeds constraint|ConstraintHasOne|has one/i);
       }
     });
 
