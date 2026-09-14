@@ -43,14 +43,14 @@ by the token on every transfer, including the lock deposit and the withdrawal.
 
 ## Two custody modes, one honest trade-off
 
-Pump.fun's distributor only pays token accounts owned by an **ordinary on-curve address**. Program-derived
-addresses are excluded (that is how pools and vaults are kept out), so a fully trustless vault can never be
-paid. Caged therefore offers both:
+Pump.fun's and stonk.fun's reward distributors only pay token accounts owned by an **ordinary on-curve
+address**. Program-derived addresses are excluded (that is how pools and vaults are kept out), so a fully
+trustless vault can never be paid. Caged therefore offers both:
 
 | | Caged custody (default) | Trustless |
 | --- | --- | --- |
 | Holder address | a real keypair held by Caged's signing service | a program-derived address |
-| Pump.fun holder rewards | paid to the lock | **not paid** |
+| Pump.fun / stonk.fun holder rewards | paid to the lock | **not paid** |
 | Who enforces owner, amount, unlock date, fees | the on-chain program | the on-chain program |
 | Can Caged move locked tokens early | technically yes, with the holder key | no, nobody can |
 
