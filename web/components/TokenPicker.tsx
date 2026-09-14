@@ -6,6 +6,8 @@ import { fetchWalletTokens, WalletToken } from "@/lib/tokens";
 import { formatUnits, shortAddr } from "@/lib/format";
 
 export function PumpBadge({ t }: { t: Pick<WalletToken, "pump"> }) {
+  if (t.pump.launchpad === "stonk")
+    return <span className="badge bg-acid/15 text-acid" title={`stonk.fun coin, ${(t.pump.feeBps ?? 0) / 100}% transfer tax funds holder rewards`}>✦ stonk.fun rewards</span>;
   if (t.pump.isHolderReward)
     return <span className="badge bg-acid/15 text-acid">✦ Holder Rewards</span>;
   if (t.pump.isPump) return <span className="badge bg-ink-600 text-slate-300">pump.fun (no holder rewards)</span>;

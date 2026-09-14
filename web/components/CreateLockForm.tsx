@@ -132,6 +132,12 @@ export default function CreateLockForm() {
         <div>
           <div className="label">01 / Select your token</div>
           <TokenPicker value={token} onChange={setToken} refreshKey={refreshKey} />
+          {token && token.pump.launchpad === "stonk" && (
+            <p className="mt-2 text-xs text-slate-400">
+              stonk.fun coin: a permanent {(token.pump.feeBps ?? 0) / 100}% transfer tax is charged on every transfer, so it applies once when locking and
+              once when withdrawing. Holder rewards are paid in {quoteSymbol || "the paired asset"} and reach the lock only in Caged custody mode.
+            </p>
+          )}
           {token && !token.pump.isHolderReward && (
             <p className="mt-2 text-xs text-slate-400">
               This is not a pump.fun Holder Rewards coin. You can still lock it, but it will not earn holder

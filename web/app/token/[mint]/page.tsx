@@ -68,7 +68,11 @@ export default function TokenPage() {
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
               <CopyAddress label="CA" address={data.mint} full />
               <a className="text-slate-400 underline" href={EXPLORER(data.mint)} target="_blank" rel="noreferrer">Solscan ↗</a>
-              {data.pump?.isHolderReward && <span className="badge bg-acid/15 text-acid">✦ Holder Rewards</span>}
+              {data.pump?.launchpad === "stonk" ? (
+                <span className="badge bg-acid/15 text-acid">✦ stonk.fun rewards · {(data.pump.feeBps ?? 0) / 100}% tax</span>
+              ) : (
+                data.pump?.isHolderReward && <span className="badge bg-acid/15 text-acid">✦ Holder Rewards</span>
+              )}
               {data.pump?.isPump && !data.pump.isHolderReward && (
                 <span className="badge bg-ink-600 text-slate-300">pump.fun</span>
               )}

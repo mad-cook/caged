@@ -34,6 +34,13 @@ like, while the tokens stay locked until the unlock time they chose.
   showing how much of its supply is locked and by whom.
 * Works with classic SPL and Token-2022 mints.
 
+## stonk.fun coins
+
+stonk.fun coins (Token-2022 with a permanent 1–3% transfer tax that funds their rewards, paid in the
+paired asset such as xStocks, pre-IPO tokens, ZEC or HYPE) can be locked too. Their distributor also pays
+only ordinary wallet addresses, so use Caged custody mode to keep receiving. The transfer tax is charged
+by the token on every transfer, including the lock deposit and the withdrawal.
+
 ## Two custody modes, one honest trade-off
 
 Pump.fun's distributor only pays token accounts owned by an **ordinary on-curve address**. Program-derived

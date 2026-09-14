@@ -4,7 +4,7 @@
  */
 import { Connection, PublicKey } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "./constants";
-import { getPumpStatuses, PumpStatus } from "./pump";
+import { getLaunchStatuses, PumpStatus } from "./pump";
 
 export interface TokenMeta {
   mint: string;
@@ -76,7 +76,7 @@ export async function fetchWalletTokens(connection: Connection, owner: PublicKey
 
   const mints = rows.map((r) => new PublicKey(r.mint));
   const [statuses, metas] = await Promise.all([
-    getPumpStatuses(connection, mints),
+    getLaunchStatuses(connection, mints),
     fetchTokenMeta(rows.map((r) => r.mint)),
   ]);
 
@@ -97,7 +97,7 @@ export async function fetchWalletTokens(connection: Connection, owner: PublicKey
 
   // Holder-reward coins first, then other pump coins, then the rest.
   tokens.sort((a, b) => {
-    const score = (t: WalletToken) => (t.pump.isHolderReward ? 2 : t.pump.isPump ? 1 : 0);
+    const score = (t: WalletToken) => (t.pump.isHolderReward ? 2 : t.pump.isPump || t.pump.launchpad === "stonk" ? 1 : 0);
     return score(b) - score(a) || a.symbol.localeCompare(b.symbol);
   });
   return tokens;

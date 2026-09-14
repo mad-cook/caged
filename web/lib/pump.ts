@@ -7,6 +7,7 @@
  */
 import { Connection, PublicKey } from "@solana/web3.js";
 import { PUMP_AMM_PROGRAM_ID, PUMP_PROGRAM_ID, WSOL_MINT } from "./constants";
+import { getStonkStatuses } from "./stonk";
 
 // BondingCurve: 8 disc | 5×u64 (40) | complete u8 | creator 32 | mayhem u8 |
 // cashback u8 | quote_mint 32 | creator_fee_bps u64 | can_edit u8 | is_holder_reward u8
@@ -24,6 +25,10 @@ const POOL_HOLDER_REWARD_OFFSET = 8 + 1 + 2 + 32 * 6 + 8 + 32 + 1 + 1 + 16 + 8 +
 const POOL_DISC = Buffer.from([241, 154, 109, 4, 17, 177, 109, 188]);
 
 export interface PumpStatus {
+  /** which launchpad pays holder rewards for this coin, if any */
+  launchpad?: "pump" | "stonk" | null;
+  /** stonk.fun: permanent transfer tax in bps on every transfer */
+  feeBps?: number;
   /** true if the mint is a pump.fun coin at all (bonding curve exists) */
   isPump: boolean;
   /** true if the creator fee is redirected to holders */
@@ -148,4 +153,28 @@ async function getMultiple(connection: Connection, keys: PublicKey[]): Promise<(
     for (const info of infos) res.push(info ? Buffer.from(info.data) : null);
   }
   return res;
+}
+
+/**
+ * pump.fun status plus stonk.fun detection for everything that is not a pump coin.
+ * stonk.fun coins are reported with isHolderReward = true, launchpad = "stonk" and
+ * quoteMint = the asset their rewards are paid in.
+ */
+export async function getLaunchStatuses(connection: Connection, mints: PublicKey[]): Promise<Map<string, PumpStatus>> {
+  const out = await getPumpStatuses(connection, mints);
+  for (const v of out.values()) v.launchpad = v.isPump ? "pump" : null;
+  const rest = mints.filter((m) => !out.get(m.toBase58())?.isPump);
+  if (!rest.length) return out;
+  const stonk = await getStonkStatuses(connection, rest).catch(() => new Map());
+  for (const m of rest) {
+    const st = stonk.get(m.toBase58());
+    if (!st?.isStonk) continue;
+    const cur = out.get(m.toBase58())!;
+    cur.launchpad = "stonk";
+    cur.feeBps = st.feeBps;
+    cur.isHolderReward = true;
+    cur.quoteMint = st.quoteMint && st.quoteMint !== WSOL_MINT.toBase58() ? st.quoteMint : null;
+    cur.pool = st.pool;
+  }
+  return out;
 }

@@ -33,7 +33,7 @@ import {
   withdrawIx,
 } from "@/lib/program";
 import { TokenMeta, fetchTokenMeta } from "@/lib/tokens";
-import { PumpStatus, getPumpStatuses } from "@/lib/pump";
+import { PumpStatus, getLaunchStatuses } from "@/lib/pump";
 import { countdown, formatDate, formatUnits, lamportsToSol, parseUnits, shortAddr, toDatetimeLocal } from "@/lib/format";
 import { EXPLORER } from "@/lib/constants";
 
@@ -85,7 +85,7 @@ export default function LockCard({
 
   useEffect(() => {
     fetchTokenMeta([lock.mint.toBase58()]).then((m) => setMeta(m.get(lock.mint.toBase58()) ?? null));
-    getPumpStatuses(connection, [lock.mint]).then((m) => {
+    getLaunchStatuses(connection, [lock.mint]).then((m) => {
       const p = m.get(lock.mint.toBase58()) ?? null;
       setPump(p);
       if (p?.quoteMint) {
@@ -126,7 +126,7 @@ export default function LockCard({
   }
 
   const quoteMeta = pump?.quoteMint ? rewardMeta.get(pump.quoteMint) : undefined;
-  const quoteLabel = pump?.quoteMint ? quoteMeta?.symbol || shortAddr(pump.quoteMint) : "SOL";
+  const quoteLabel = pump?.quoteMint ? quoteMeta?.symbol || shortAddr(pump.quoteMint) : pump?.launchpad === "stonk" ? "the paired asset" : "SOL";
   const feePct = config ? config.rewardFeeBps / 100 : 2;
   const netClaim = claimable - Math.floor((claimable * (config?.rewardFeeBps ?? 200)) / 10_000);
   const estBonus = boost && boost.active && poolPaysSol(boost) && boostedShare > 0 ? Math.floor((netClaim * lock.bonusBps * boostedShare) / 10_000) : 0;

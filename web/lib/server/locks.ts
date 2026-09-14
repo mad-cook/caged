@@ -8,7 +8,7 @@ import bs58 from "bs58";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import idl from "@/idl/holder_locker.json";
 import { PROGRAM_ID } from "@/lib/constants";
-import { getPumpStatuses, PumpStatus } from "@/lib/pump";
+import { getLaunchStatuses, PumpStatus } from "@/lib/pump";
 import { formatUnits } from "@/lib/format";
 import { resolveTokenMeta } from "@/lib/server/meta";
 
@@ -139,6 +139,27 @@ async function fetchMeta(mint: string): Promise<{ name: string | null; symbol: s
   return { name: m.name, symbol: m.symbol, image: m.image, decimals: m.decimals };
 }
 
+/** Highest-TVL Raydium pool for a mint -> the other side of the pair (null for SOL or unknown). */
+async function raydiumPairedAsset(mint: string): Promise<string | null> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const url = "https://api-v3.raydium.io/pools/info/mint?mint1=" + mint + "&poolType=all&poolSortField=default&sortType=desc&pageSize=5&page=1";
+    const res = await fetch(url, { signal: ctrl.signal, cache: "no-store" });
+    const j = await res.json();
+    const rows: any[] = j?.data?.data || [];
+    if (!rows.length) return null;
+    const best = rows.sort((a, b) => (b.tvl || 0) - (a.tvl || 0))[0];
+    const other = best.mintA?.address === mint ? best.mintB?.address : best.mintA?.address;
+    if (!other || other === "So11111111111111111111111111111111111111112") return null;
+    return other;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export async function buildTokenLocks(mint: PublicKey): Promise<TokenLocksJson> {
   const conn = serverConnection();
   const boostPda = PublicKey.findProgramAddressSync([Buffer.from("boost"), mint.toBuffer()], PROGRAM_ID)[0];
@@ -147,7 +168,7 @@ export async function buildTokenLocks(mint: PublicKey): Promise<TokenLocksJson> 
     fetchLocksForMint(mint),
     conn.getTokenSupply(mint, "confirmed").catch(() => null),
     fetchMeta(mint.toBase58()),
-    getPumpStatuses(conn, [mint]).catch(() => new Map<string, PumpStatus>()),
+    getLaunchStatuses(conn, [mint]).catch(() => new Map<string, PumpStatus>()),
     conn.getAccountInfo(boostPda, "confirmed").catch(() => null),
   ]);
 
@@ -209,6 +230,11 @@ export async function buildTokenLocks(mint: PublicKey): Promise<TokenLocksJson> 
   }
 
   const pump = pumpMap.get(mint.toBase58()) ?? null;
+  // Older stonk.fun coins (pre-LaunchLab) have no on-chain pool record we can read; ask Raydium which pool they trade in.
+  if (pump && pump.launchpad === "stonk" && !pump.quoteMint) {
+    const q = await raydiumPairedAsset(mint.toBase58()).catch(() => null);
+    if (q) pump.quoteMint = q;
+  }
   let rewardAsset: TokenLocksJson["rewardAsset"] = null;
   if (pump?.quoteMint) {
     const q = await fetchMeta(pump.quoteMint);
