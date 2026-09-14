@@ -30,6 +30,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install solana-verify
+        # the repo's rust-toolchain.toml pins 1.79 for the program build; the CLI needs a current stable
+        env:
+          RUSTUP_TOOLCHAIN: stable
         run: cargo install solana-verify --locked
 
       - name: Reproducible build (Docker, solana 1.18.26 toolchain)
