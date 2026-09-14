@@ -1,0 +1,45 @@
+name: verifiable build
+
+# Reproducible Docker build of the program (solana-verify), compared against the
+# program deployed on mainnet. Run manually. The .so is uploaded as an artifact
+# so it can be deployed if the on-chain binary was built differently.
+on:
+  workflow_dispatch:
+    inputs:
+      program_id:
+        description: Program id to compare against
+        default: 65cX8gGch8x4vQvU4gnpPcepwKadDSAtJ4ZgZg3hp61t
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install solana-verify
+        run: cargo install solana-verify --locked
+
+      - name: Reproducible build (Docker, solana 1.18.26 toolchain)
+        run: |
+          solana-verify build --library-name holder_locker --base-image solanafoundation/solana-verifiable-build:1.18.26
+          ls -la target/deploy/holder_locker.so
+
+      - name: Hashes
+        id: hashes
+        run: |
+          LOCAL=$(solana-verify get-executable-hash target/deploy/holder_locker.so)
+          ONCHAIN=$(solana-verify get-program-hash -u https://api.mainnet-beta.solana.com ${{ inputs.program_id }})
+          echo "local=$LOCAL"   | tee -a $GITHUB_OUTPUT
+          echo "onchain=$ONCHAIN" | tee -a $GITHUB_OUTPUT
+          if [ "$LOCAL" = "$ONCHAIN" ]; then echo "RESULT: MATCH - on-chain program is the reproducible build"; else echo "RESULT: MISMATCH - deploy the artifact, then upload the verification PDA"; fi
+          echo "commit=$(git rev-parse HEAD)" | tee -a $GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: holder_locker-verifiable-${{ github.sha }}
+          path: target/deploy/holder_locker.so
+          if-no-files-found: error
