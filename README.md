@@ -92,9 +92,11 @@ GET /api/stats          protocol-wide counters
 | Program | `65cX8gGch8x4vQvU4gnpPcepwKadDSAtJ4ZgZg3hp61t` |
 | Framework | Anchor |
 | Source | [`programs/holder_locker`](programs/holder_locker/src/lib.rs) |
+| Verified build | [OtterSec registry](https://verify.osec.io/status/65cX8gGch8x4vQvU4gnpPcepwKadDSAtJ4ZgZg3hp61t): on-chain hash matches a reproducible `solana-verify` build of this repo |
+| IDL | published on-chain (Solscan / Explorer decode every instruction) |
 
-The program is small and open source. Read it before locking large amounts. It has not been
-independently audited.
+The program is small and open source, and the deployed binary is verified against this repository.
+Read it before locking large amounts. It has not been independently audited.
 
 Pump.fun decides who counts as a holder and how much each receives; Caged makes each lock
 indistinguishable from a normal holder wallet, but pump.fun's rules can change at any time.
