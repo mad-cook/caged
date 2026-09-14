@@ -4,12 +4,15 @@ name: verifiable build
 # program deployed on mainnet. Run manually. The .so is uploaded as an artifact
 # so it can be deployed if the on-chain binary was built differently.
 on:
+  push:
+    branches: [main]
+    paths: ["programs/**", "Cargo.lock", "Cargo.toml", ".github/workflows/verify.yml"]
   workflow_dispatch:
     inputs:
       program_id:
         description: Program id to compare against
         default: 65cX8gGch8x4vQvU4gnpPcepwKadDSAtJ4ZgZg3hp61t
-        required: true
+        required: false
 
 jobs:
   build:
@@ -32,7 +35,7 @@ jobs:
         id: hashes
         run: |
           LOCAL=$(solana-verify get-executable-hash target/deploy/holder_locker.so)
-          ONCHAIN=$(solana-verify get-program-hash -u https://api.mainnet-beta.solana.com ${{ inputs.program_id }})
+          ONCHAIN=$(solana-verify get-program-hash -u https://api.mainnet-beta.solana.com ${{ inputs.program_id || '65cX8gGch8x4vQvU4gnpPcepwKadDSAtJ4ZgZg3hp61t' }})
           echo "local=$LOCAL"   | tee -a $GITHUB_OUTPUT
           echo "onchain=$ONCHAIN" | tee -a $GITHUB_OUTPUT
           if [ "$LOCAL" = "$ONCHAIN" ]; then echo "RESULT: MATCH - on-chain program is the reproducible build"; else echo "RESULT: MISMATCH - deploy the artifact, then upload the verification PDA"; fi
