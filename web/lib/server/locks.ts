@@ -5,7 +5,7 @@
 import { BorshAccountsCoder, Idl } from "@coral-xyz/anchor";
 import { Connection, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { getAssociatedTokenAddressSync, unpackAccount } from "@solana/spl-token";
 import idl from "@/idl/holder_locker.json";
 import { PROGRAM_ID } from "@/lib/constants";
 import { getLaunchStatuses, PumpStatus } from "@/lib/pump";
@@ -48,6 +48,9 @@ export interface LockJson {
   bonusPaidLamports: string;
   /** true = holder key held by Caged (eligible for pump.fun holder rewards); false = trustless PDA vault */
   custodial: boolean;
+  /** what the vault actually holds (differs from amountRaw for transfer-tax tokens); null if unreadable */
+  vaultBalanceRaw: string | null;
+  vaultBalance: string | null;
 }
 
 export interface TokenLocksJson {
@@ -106,6 +109,8 @@ function decodeLock(pubkey: PublicKey, data: Buffer): LockJson & { decimalsHint?
     solRewardsClaimedLamports: l.sol_rewards_claimed.toString(),
     bonusPaidLamports: l.bonus_paid.toString(),
     custodial: l.vault_bump === 0,
+    vaultBalanceRaw: null,
+    vaultBalance: null,
   };
 }
 
@@ -173,6 +178,23 @@ export async function buildTokenLocks(mint: PublicKey): Promise<TokenLocksJson> 
   ]);
 
   const decimals = supply?.value.decimals ?? meta.decimals ?? 6;
+  // real vault balances (transfer-tax tokens arrive net of tax)
+  const tokenProgram = (await conn.getAccountInfo(mint, "confirmed"))?.owner;
+  if (tokenProgram && locks.length) {
+    const vaults = locks.map((l) => getAssociatedTokenAddressSync(mint, new PublicKey(l.vaultAuthority), true, tokenProgram));
+    for (let i = 0; i < vaults.length; i += 100) {
+      const infos = await conn.getMultipleAccountsInfo(vaults.slice(i, i + 100), "confirmed").catch(() => []);
+      infos.forEach((info, j) => {
+        const l = locks[i + j];
+        if (!info) { l.vaultBalanceRaw = l.withdrawn ? "0" : null; return; }
+        try {
+          const acc = unpackAccount(vaults[i + j], info, tokenProgram);
+          l.vaultBalanceRaw = acc.amount.toString();
+          l.vaultBalance = formatUnits(acc.amount, decimals, 2);
+        } catch { l.vaultBalanceRaw = null; }
+      });
+    }
+  }
   let total = 0n;
   let active = 0;
   let rewards = 0n;
@@ -181,7 +203,7 @@ export async function buildTokenLocks(mint: PublicKey): Promise<TokenLocksJson> 
   for (const l of locks) {
     l.amount = formatUnits(l.amountRaw, decimals, 2);
     if (!l.withdrawn) {
-      total += BigInt(l.amountRaw);
+      total += BigInt(l.vaultBalanceRaw ?? l.amountRaw);
       active++;
       owners.add(l.owner);
       if (nextUnlock === null || l.unlockTs < nextUnlock) nextUnlock = l.unlockTs;

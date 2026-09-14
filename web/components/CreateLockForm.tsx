@@ -159,6 +159,12 @@ export default function CreateLockForm() {
               </button>
             )}
           </div>
+          {token && (token.pump.feeBps ?? 0) > 0 && rawAmount && rawAmount > 0n && (
+            <p className="mb-1.5 text-xs text-slate-400">
+              Arrives in the vault: {formatUnits(rawAmount - (rawAmount * BigInt(token.pump.feeBps ?? 0)) / 10_000n, token.decimals)} {token.symbol} after the
+              token's {(token.pump.feeBps ?? 0) / 100}% transfer tax.
+            </p>
+          )}
           <input
             id="lock-amount"
             className="input font-mono"

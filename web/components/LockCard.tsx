@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { BN } from "@coral-xyz/anchor";
 import TxStatus from "./TxStatus";
 import { PumpBadge } from "./TokenPicker";
@@ -59,6 +60,8 @@ export default function LockCard({
   /** metadata for reward mints + the coin's quote mint, keyed by mint */
   const [rewardMeta, setRewardMeta] = useState<Map<string, TokenMeta>>(new Map());
   const [boost, setBoost] = useState<BoostPoolAccount | null>(null);
+  /** what the vault really holds; differs from lock.amount for transfer-tax tokens */
+  const [vaultBalance, setVaultBalance] = useState<bigint | null>(null);
   const [now, setNow] = useState(Date.now() / 1000);
   const [panel, setPanel] = useState<"none" | "extend" | "topup">("none");
   const [extendLocal, setExtendLocal] = useState(() => toDatetimeLocal(lock.unlockTs.toNumber() + 30 * 86400));
@@ -77,6 +80,12 @@ export default function LockCard({
     setClaimable(c);
     setTokenRewards(tr);
     setBoost(b);
+    if (!lock.withdrawn) {
+      connection
+        .getTokenAccountBalance(getAssociatedTokenAddressSync(lock.mint, lock.vaultAuthority, true, lock.tokenProgram), "confirmed")
+        .then((v) => setVaultBalance(BigInt(v.value.amount)))
+        .catch(() => setVaultBalance(null));
+    }
     if (tr.length) {
       const mints = tr.map((r) => r.mint.toBase58());
       fetchTokenMeta(mints).then((m) => setRewardMeta((prev) => new Map([...prev, ...m]))).catch(() => null);
@@ -163,7 +172,12 @@ export default function LockCard({
         </div>
         <div className="text-right">
           <div className="font-mono text-xl font-bold">
-            {formatUnits(lock.amount, decimals)} <span className="text-sm text-slate-400">{meta?.symbol}</span>
+            {formatUnits(vaultBalance ?? lock.amount, decimals)} <span className="text-sm text-slate-400">{meta?.symbol}</span>
+            {vaultBalance !== null && !lock.withdrawn && vaultBalance < BigInt(lock.amount.toString()) && (
+              <div className="text-[11px] font-sans font-normal text-slate-500" title="The token charges a transfer tax on every transfer, including the lock deposit">
+                sent {formatUnits(lock.amount, decimals)} · tax deducted by the token
+              </div>
+            )}
           </div>
           <div className={`text-sm ${unlocked ? "text-acid" : "text-slate-300"}`}>
             {lock.withdrawn ? "—" : unlocked ? "Unlocked" : `Unlocks in ${countdown(unlockTs, now)}`}
